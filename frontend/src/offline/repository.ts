@@ -1,5 +1,5 @@
-import { ApiError, type Api } from '../api/client';
 import type {
+  Dashboard,
   Duty,
   Exam,
   Homework,
@@ -11,130 +11,83 @@ import { buildOfflineDashboard, demoUniform } from './seed';
 import type { OfflineStorage } from './storage';
 
 /**
- * Local-first data source. Read paths try the API and fall back to the bundled
- * dataset when the device is offline; mutations are applied locally and
- * persisted so the demo stays consistent after a restart.
+ * Local data source. There is no network path in this app: every read and write
+ * goes to the bundled dataset persisted in AsyncStorage.
  *
- * ponytail: writes are not queued for the server. Add a change log and replay it
- * through /sync/push when offline edits must reach other devices.
+ * ponytail: writes stay on the device. Add a change log + export/import (or a
+ * server) when data must move between devices.
  */
-export type Repository = Pick<
-  Api,
-  | 'dashboard'
-  | 'duties'
-  | 'completeDuty'
-  | 'homework'
-  | 'exams'
-  | 'subjects'
-  | 'uniformChecklist'
-  | 'toggleUniform'
->;
-
-/** A fetch that never reached the server (DNS, no route, airplane mode). */
-export function isOfflineError(error: unknown): boolean {
-  if (error instanceof ApiError) return false;
-  return error instanceof TypeError || (error instanceof Error && /network request failed/i.test(error.message));
+export interface Repository {
+  dashboard(): Promise<Dashboard>;
+  duties(): Promise<Page<Duty>>;
+  completeDuty(id: string): Promise<{
+    duty: Duty;
+    toast: { type: 'success' | 'info'; message: string };
+  }>;
+  homework(): Promise<Page<Homework>>;
+  exams(): Promise<Page<Exam>>;
+  subjects(): Promise<Page<Subject>>;
+  uniformChecklist(date?: string): Promise<UniformChecklist>;
+  toggleUniform(date: string, itemKey: string, checked: boolean): Promise<UniformChecklist>;
 }
 
-export function createRepository(options: { api: Api; storage: OfflineStorage }): Repository {
-  const { api, storage } = options;
-
-  async function read<T>(remote: () => Promise<T>, local: () => Promise<T>): Promise<T> {
-    try {
-      return await remote();
-    } catch (error) {
-      if (!isOfflineError(error)) throw error;
-      return local();
-    }
-  }
-
+export function createRepository(storage: OfflineStorage): Repository {
   return {
-    dashboard: () =>
-      read(
-        () => api.dashboard(),
-        async () => buildOfflineDashboard(await storage.load()),
-      ),
+    dashboard: async () => buildOfflineDashboard(await storage.load()),
 
-    duties: () =>
-      read(
-        () => api.duties({ limit: '50' }),
-        async () => {
-          const dataset = await storage.load();
-          const items = [...dataset.duties].sort((a, b) => a.date.localeCompare(b.date));
-          return { items } satisfies Page<Duty>;
-        },
-      ),
+    duties: async () => {
+      const dataset = await storage.load();
+      return { items: [...dataset.duties].sort((a, b) => a.date.localeCompare(b.date)) };
+    },
 
-    completeDuty: (id: string) =>
-      read(
-        () => api.completeDuty(id),
-        async () => {
-          const dataset = await storage.load();
-          const duty = dataset.duties.find((item) => item.id === id);
-          if (!duty) {
-            return {
-              duty: dataset.duties[0]!,
-              toast: { type: 'info' as const, message: 'Piket tidak ditemukan di data offline.' },
-            };
-          }
-          const completed: Duty = {
-            ...duty,
-            completedAt: new Date().toISOString(),
-            status: 'COMPLETED',
-            canComplete: false,
-          };
-          await storage.save({
-            ...dataset,
-            duties: dataset.duties.map((item) => (item.id === id ? completed : item)),
-          });
-          return { duty: completed, toast: { type: 'success' as const, message: 'Piket ditandai selesai.' } };
-        },
-      ),
+    completeDuty: async (id) => {
+      const dataset = await storage.load();
+      const duty = dataset.duties.find((item) => item.id === id);
+      if (!duty) {
+        return {
+          duty: dataset.duties[0]!,
+          toast: { type: 'info' as const, message: 'Piket tidak ditemukan.' },
+        };
+      }
+      const completed: Duty = {
+        ...duty,
+        completedAt: new Date().toISOString(),
+        status: 'COMPLETED',
+        canComplete: false,
+      };
+      await storage.save({
+        ...dataset,
+        duties: dataset.duties.map((item) => (item.id === id ? completed : item)),
+      });
+      return { duty: completed, toast: { type: 'success' as const, message: 'Piket ditandai selesai.' } };
+    },
 
-    homework: () =>
-      read(
-        () => api.homework(),
-        async () => ({ items: (await storage.load()).homework }) satisfies Page<Homework>,
-      ),
+    homework: async () => ({ items: (await storage.load()).homework }),
 
-    exams: () =>
-      read(
-        () => api.exams(),
-        async () =>
-          ({
-            items: [...(await storage.load()).exams].sort((a, b) => a.examDate.localeCompare(b.examDate)),
-          }) satisfies Page<Exam>,
-      ),
+    exams: async () => {
+      const dataset = await storage.load();
+      return {
+        items: [...dataset.exams].sort((a, b) => a.examDate.localeCompare(b.examDate)),
+      };
+    },
 
-    subjects: () =>
-      read(
-        () => api.subjects(),
-        async () => ({ items: (await storage.load()).subjects }) satisfies Page<Subject>,
-      ),
+    subjects: async () => ({ items: (await storage.load()).subjects }),
 
-    uniformChecklist: (date?: string) =>
-      read(
-        () => api.uniformChecklist(date),
-        async () => {
-          const dataset = await storage.load();
-          // A cached checklist belongs to the day it was generated for.
-          if (date && dataset.uniform.date !== date) return demoUniform(date);
-          return dataset.uniform;
-        },
-      ),
+    uniformChecklist: async (date?: string) => {
+      const dataset = await storage.load();
+      // A stored checklist belongs to the day it was generated for.
+      if (date && dataset.uniform.date !== date) return demoUniform(date);
+      return dataset.uniform;
+    },
 
-    toggleUniform: (date: string, itemKey: string, checked: boolean) =>
-      read(
-        () => api.toggleUniform(date, itemKey, checked),
-        async () => {
-          const dataset = await storage.load();
-          const checkedKeys = dataset.uniform.items
-            .filter((item) => (item.key === itemKey ? checked : item.checked))
-            .map((item) => item.key);
-          const checklist: UniformChecklist = demoUniform(date, checkedKeys);
-          await storage.save({ ...dataset, uniform: checklist });
-          return checklist;
-        },
-      ),
+    toggleUniform: async (date, itemKey, checked) => {
+      const dataset = await storage.load();
+      const checkedKeys = dataset.uniform.items
+        .filter((item) => (item.key === itemKey ? checked : item.checked))
+        .map((item) => item.key);
+      const checklist = demoUniform(date, checkedKeys);
+      await storage.save({ ...dataset, uniform: checklist });
+      return checklist;
+    },
   };
 }

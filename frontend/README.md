@@ -1,8 +1,11 @@
 # AsistenSiswa — Mobile App
 
-Expo (SDK 50, React Native 0.73.6) + TypeScript client for the AsistenSiswa
-backend. Students see today's duty, uniform checklist, homework and exam
-schedule; late homework is red, published exams are read-only.
+Expo (SDK 50, React Native 0.73.6) + TypeScript app. Students see today's duty,
+uniform checklist, homework and exam schedule; late homework is red, published
+exams are read-only.
+
+**Fully offline.** The app has no API client, no login and no INTERNET
+permission — every screen reads and writes a dataset bundled in the APK.
 
 > SDK 50 is the Expo release that pairs with RN 0.73.6. If the team pins SDK 49
 > instead, RN must move to 0.72.x.
@@ -10,13 +13,12 @@ schedule; late homework is red, published exams are read-only.
 ## Run
 
 ```bash
-cp .env.example .env      # optional; defaults to localhost:4000
 npm install
 npm start                 # Expo dev server (a/i for Android/iOS)
 ```
 
-The API base URL resolves from `EXPO_PUBLIC_API_URL` first, then
-`app.json → expo.extra.apiUrl`. Both must include the `/api/v1` prefix.
+There is nothing to configure: no server, no credentials, no environment
+variables.
 
 ## Scripts
 
@@ -34,37 +36,33 @@ The API base URL resolves from `EXPO_PUBLIC_API_URL` first, then
 ```
 App.tsx                     providers (store, theme, safe area), session restore
 src/
-├─ api/        client.ts (fetch, bearer, 401 refresh), types.ts (openapi mirror)
+├─ api/        types.ts (shared model types)
 ├─ components/ Screen, Card, StatusBadge, ChecklistRow, PrimaryButton, EmptyState
-├─ navigation/ RootNavigator (auth stack vs. lazy bottom tabs)
-├─ screens/    Login, Register, Dashboard, Duty, Homework, Exam, Uniform
-├─ store/      Redux Toolkit slices, session storage
+├─ navigation/ RootNavigator (lazy bottom tabs, no auth stack)
+├─ offline/    seed.ts (bundled dataset), storage.ts (AsyncStorage), repository.ts
+├─ screens/    Dashboard, Duty, Homework, Exam, Uniform
+├─ store/      Redux Toolkit data slice
 ├─ theme/      tokens (light/dark), WCAG contrast helpers
 └─ utils/      Indonesian date/clock/relative-day formatting
 ```
 
-### Offline mode
+### Data
 
-The app is local-first. `src/offline/repository.ts` wraps every data call: it
-uses the API when reachable and falls back to a bundled dataset
-(`src/offline/seed.ts`) on transport failures, so airplane mode still shows
-duty, uniform, homework and exams. Offline mutations (complete duty, tick a
-uniform item) are written to AsyncStorage and survive restarts.
+`src/offline/seed.ts` is the dataset (dates are relative to today, so the app
+always looks current). `storage.ts` seeds AsyncStorage once and persists
+mutations; `repository.ts` is the only data source — no fetch, no server.
 
-"Mode offline (data contoh)" on the login screen opens the demo dataset without
-credentials; `restoreSession` reopens it on the next launch until the user signs
-out. Server errors (401/403/5xx) are **not** masked by the fallback.
+Completing a duty or ticking a uniform item writes straight to the device store
+and survives restarts. `android.blockedPermissions` removes INTERNET, so the
+APK cannot reach a network even by accident.
 
-ponytail: offline writes are not queued for `/sync/push`. Add a change log plus
-WatermelonDB when edits must reach other devices.
+ponytail: data is device-local. Add export/import or a sync layer when it must
+move between devices.
 
 ### State
 
-`authSlice` owns the session and persists only the rotating token pair
-(AsyncStorage). `dataSlice` caches the last successful payload per resource, so
-a failed refresh keeps the previous list on screen instead of blanking it.
-API 401s trigger exactly one refresh attempt; concurrent 401s share it, because
-refresh tokens are single-use.
+`dataSlice` holds the loaded resources and their status. A storage failure
+surfaces as an error while keeping any previously loaded rows on screen.
 
 ### Accessibility
 
@@ -85,7 +83,7 @@ red. Colour is never the only signal — every card carries a text badge.
 ## Testing
 
 ```bash
-npm test                  # 76 tests, 8 suites
+npm test                  # 51 tests, 6 suites
 npm run test:coverage     # gate: statements 80, branches 70, functions 80, lines 80
 ```
 
@@ -98,31 +96,17 @@ thunks, loading and error states are exercised rather than mocked away.
 Requires JDK 17 and Android SDK 34 (`ANDROID_HOME` set). No Expo account needed.
 
 ```bash
-npx expo prebuild -p android          # generates android/ (already committed?)
-cd android && ./gradlew assembleRelease
+npx expo prebuild -p android
+cd android && ./gradlew clean assembleRelease
 # -> app/build/outputs/apk/release/app-release.apk
 ```
 
 The generated project signs release builds with the debug keystore, so the APK
-installs on a device but is **not** store-ready.
-
-Point the app at your API in `app.json → expo.extra.apiUrl` (for example
-`http://192.168.1.10:4000/api/v1`), then rebuild. `EXPO_PUBLIC_API_URL` still
-overrides it when the JS bundle is produced, but Gradle/Metro caches can keep an
-older value, so the config file is the reliable source for a demo build:
-
-```bash
-rm -rf android/app/build && (cd android && ./gradlew assembleRelease)
-```
-
-Cleartext HTTP is enabled through `expo-build-properties`
-(`android.usesCleartextTraffic`). Remove it for production and serve the API
-over TLS.
+installs on a device but is **not** store-ready. `gradle` caches `app.config` and
+the JS bundle aggressively — use `clean` (or delete `android/app/build`) when a
+change does not show up in the APK.
 
 ## Not built yet
 
-- WatermelonDB + `POST /sync/push` replay for offline edits (the demo cache is
-  device-local only).
-- Expo push-token registration (`POST /auth/push-tokens`) and notification
-  handlers for the H-1 duty reminder.
-- Detox E2E and store release pipelines.
+- Export/import or multi-device sync (data is device-local).
+- Detox E2E and store release pipelines (debug-signed demo APK only).

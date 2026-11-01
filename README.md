@@ -7,7 +7,7 @@ late-work rules, exam calendar, subjects and teachers.
 | Part | Stack | Docs |
 | --- | --- | --- |
 | `backend/` | Node 18.18, TypeScript, Express, Prisma, PostgreSQL 15 | [backend/README.md](backend/README.md) · [openapi.yaml](backend/openapi.yaml) |
-| `frontend/` | Expo SDK 50 / React Native 0.73.6, TypeScript, Redux Toolkit | [frontend/README.md](frontend/README.md) |
+| `frontend/` | Expo SDK 50 / React Native 0.73.6, TypeScript, Redux Toolkit — **100% offline** | [frontend/README.md](frontend/README.md) |
 
 ## Quick start
 
@@ -17,7 +17,7 @@ cd backend
 cp .env.example .env     # set JWT_SECRET and FIELD_ENCRYPTION_KEY
 npm ci && npm run prisma:migrate && npm run dev
 
-# App
+# App (no server, no login, no INTERNET permission)
 cd frontend
 npm install && npm start
 ```
@@ -57,9 +57,9 @@ the Prisma schema so no database service is needed on the runner.
 ## Status
 
 Implemented and tested: backend API (auth/RBAC, all Phase 3–4 features, sync,
-push providers, migrations, OpenAPI, Docker, CI) and the app (auth, dashboard,
-duty, homework, exams, uniform, light/dark WCAG-checked theme, local-first
-offline mode with a bundled dataset).
+push providers, migrations, OpenAPI, Docker, CI) and the app (dashboard, duty,
+homework, exams, uniform, light/dark WCAG-checked theme) running entirely on a
+bundled local dataset — the APK ships without the INTERNET permission.
 
-Not yet: WatermelonDB sync queue for offline edits, push-token registration in
-the app, Detox E2E, store release pipelines.
+Not yet: data export/import or multi-device sync, Detox E2E, store release
+pipelines.

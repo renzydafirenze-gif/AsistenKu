@@ -38,7 +38,7 @@ export const loadDashboard = createAsyncThunk<Dashboard, void, { extra: DataDeps
 
 export const loadDuties = createAsyncThunk<Duty[], void, { extra: DataDeps }>(
   'data/duties',
-  async (_arg, { extra }) => (await extra.repository.duties({ limit: '50' })).items,
+  async (_arg, { extra }) => (await extra.repository.duties()).items,
 );
 
 export const completeDuty = createAsyncThunk<Duty, string, { extra: DataDeps }>(

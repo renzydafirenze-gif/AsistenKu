@@ -1,5 +1,4 @@
-import { ApiError, type Api } from '../src/api/client';
-import { createRepository, isOfflineError } from '../src/offline/repository';
+import { createRepository } from '../src/offline/repository';
 import { buildOfflineDashboard, createDemoDataset } from '../src/offline/seed';
 import { createOfflineStorage } from '../src/offline/storage';
 import { addDaysKey, formatDateKey } from '../src/utils/format';
@@ -17,27 +16,7 @@ function memoryBackend() {
     removeItem: async (key: string) => {
       data.delete(key);
     },
-    size: () => data.size,
   };
-}
-
-function offlineApi(): Api {
-  const fail = () => Promise.reject(new TypeError('Network request failed'));
-  return {
-    request: fail,
-    login: fail,
-    register: fail,
-    me: fail,
-    logout: fail,
-    dashboard: fail,
-    duties: fail,
-    completeDuty: fail,
-    homework: fail,
-    exams: fail,
-    subjects: fail,
-    uniformChecklist: fail,
-    toggleUniform: fail,
-  } as Api;
 }
 
 describe('offline dataset', () => {
@@ -77,37 +56,26 @@ describe('offline storage', () => {
     expect((await second.load()).uniform.completedCount).toBe(2);
   });
 
-  it('recovers from corrupt payloads', async () => {
+  it('recovers from a corrupt payload', async () => {
     const backend = memoryBackend();
-    await backend.setItem('asistensiswa.offline.dataset.v1', '{oops');
-    await backend.setItem('asistensiswa.offline.user.v1', 'nope');
+    await backend.setItem('asistensiswa.dataset.v1', '{oops');
 
     const storage = createOfflineStorage(backend);
     expect((await storage.load()).user.email).toBe('ani@sekolah.test');
-    expect(await storage.user()).toBeNull();
   });
 
-  it('remembers and clears the offline user', async () => {
+  it('resets back to the bundled seed', async () => {
     const storage = createOfflineStorage(memoryBackend());
     const dataset = await storage.load();
-    await storage.setUser(dataset.user);
-    expect((await storage.user())?.fullName).toBe('Ani Lestari');
-
-    await storage.clearUser();
-    expect(await storage.user()).toBeNull();
+    await storage.save({ ...dataset, duties: [] });
+    await storage.reset();
+    expect((await storage.load()).duties).toHaveLength(3);
   });
 });
 
-describe('offline repository', () => {
-  it('classifies transport failures, not server errors', () => {
-    expect(isOfflineError(new TypeError('Network request failed'))).toBe(true);
-    expect(isOfflineError(new Error('network request failed'))).toBe(true);
-    expect(isOfflineError(new ApiError(401, 'UNAUTHORIZED', 'nope'))).toBe(false);
-    expect(isOfflineError(new ApiError(500, 'INTERNAL', 'boom'))).toBe(false);
-  });
-
-  it('falls back to bundled data when the API is unreachable', async () => {
-    const repository = createRepository({ api: offlineApi(), storage: createOfflineStorage(memoryBackend()) });
+describe('local repository', () => {
+  it('serves every screen from the bundled dataset', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
 
     await expect(repository.dashboard()).resolves.toMatchObject({
       greeting: expect.stringMatching(/^Selamat (pagi|siang|sore|malam)$/),
@@ -119,10 +87,10 @@ describe('offline repository', () => {
     await expect(repository.uniformChecklist()).resolves.toMatchObject({ total: 4 });
   });
 
-  it('persists offline duty completion', async () => {
+  it('persists duty completion across a reload', async () => {
     const backend = memoryBackend();
     const storage = createOfflineStorage(backend);
-    const repository = createRepository({ api: offlineApi(), storage });
+    const repository = createRepository(storage);
     const dataset = await storage.load();
     const todayDuty = dataset.duties.find((duty) => duty.status === 'TODAY')!;
 
@@ -134,9 +102,15 @@ describe('offline repository', () => {
     expect(reloaded.duties.find((duty) => duty.id === todayDuty.id)?.status).toBe('COMPLETED');
   });
 
+  it('reports an unknown duty without crashing', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    const result = await repository.completeDuty('missing');
+    expect(result.toast.type).toBe('info');
+  });
+
   it('persists uniform toggles and rebuilds the checklist', async () => {
     const storage = createOfflineStorage(memoryBackend());
-    const repository = createRepository({ api: offlineApi(), storage });
+    const repository = createRepository(storage);
 
     const first = await repository.toggleUniform(TODAY, 'shirt', true);
     expect(first.completedCount).toBe(1);
@@ -147,10 +121,10 @@ describe('offline repository', () => {
     expect(second.items.find((item) => item.key === 'shirt')?.checked).toBe(true);
   });
 
-  it('does not hide real server errors', async () => {
-    const api = { ...offlineApi(), duties: () => Promise.reject(new ApiError(403, 'FORBIDDEN', 'no')) } as Api;
-    const repository = createRepository({ api, storage: createOfflineStorage(memoryBackend()) });
-
-    await expect(repository.duties()).rejects.toMatchObject({ status: 403 });
+  it('returns an empty checklist for another day', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    const other = await repository.uniformChecklist(addDaysKey(TODAY, 1));
+    expect(other.date).toBe(addDaysKey(TODAY, 1));
+    expect(other.completedCount).toBe(0);
   });
 });

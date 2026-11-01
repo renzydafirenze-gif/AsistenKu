@@ -27,7 +27,6 @@ export function DashboardScreen() {
   const dispatch = useAppDispatch();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParams>>();
   const { data, status, error } = useAppSelector((state) => state.data.dashboard);
-  const offline = useAppSelector((state) => state.auth.offline);
   const today = formatDateKey(new Date());
 
   const refresh = useCallback(() => {
@@ -44,22 +43,10 @@ export function DashboardScreen() {
   return (
     <Screen
       title={greeting}
-      subtitle={
-        (data ? `${data.user.fullName} · ${formatIndonesianDay(today)}` : formatIndonesianDay(today)) +
-        (offline ? ' · Mode offline' : '')
-      }
+      subtitle={data ? `${data.user.fullName} · ${formatIndonesianDay(today)}` : formatIndonesianDay(today)}
       refreshing={status === 'loading'}
       onRefresh={refresh}
     >
-      {offline ? (
-        <Text
-          accessibilityRole="text"
-          style={[styles.offlineNote, { color: theme.colors.textMuted }]}
-        >
-          Mode offline: data contoh tersimpan di perangkat. Perubahan tidak dikirim ke server.
-        </Text>
-      ) : null}
-
       {error ? (
         <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
           {error}
@@ -116,5 +103,4 @@ export function DashboardScreen() {
 
 const styles = StyleSheet.create({
   inlineBadge: { marginTop: 6 },
-  offlineNote: { fontSize: 12, lineHeight: 18 },
 });

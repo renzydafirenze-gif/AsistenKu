@@ -1,39 +1,23 @@
 import { configureStore } from '@reduxjs/toolkit';
 import { useDispatch, useSelector, type TypedUseSelectorHook } from 'react-redux';
 
-import { createApi } from '../api/client';
 import { createRepository } from '../offline/repository';
 import { createOfflineStorage, type OfflineStorage } from '../offline/storage';
-import { authReducer } from './authSlice';
 import { dataReducer } from './dataSlice';
-import { createSessionStorage, type SessionStorage } from './storage';
 
 export interface StoreDeps {
-  api?: ReturnType<typeof createApi>;
-  storage?: SessionStorage;
   offline?: OfflineStorage;
 }
 
-export function createStore({ api, storage, offline }: StoreDeps = {}) {
-  const sessionStorage = storage ?? createSessionStorage();
-  const offlineStorage = offline ?? createOfflineStorage();
-  const client = api ?? createApi({ store: sessionStorage });
-  const repository = createRepository({ api: client, storage: offlineStorage });
+/** Local-only store: the app has no network client at all. */
+export function createStore(deps: StoreDeps = {}) {
+  const storage = deps.offline ?? createOfflineStorage();
+  const repository = createRepository(storage);
 
   return configureStore({
-    reducer: { auth: authReducer, data: dataReducer },
+    reducer: { data: dataReducer },
     middleware: (getDefault) =>
-      getDefault({
-        serializableCheck: false,
-        thunk: {
-          extraArgument: {
-            api: client,
-            storage: sessionStorage,
-            offline: offlineStorage,
-            repository,
-          },
-        },
-      }),
+      getDefault({ serializableCheck: false, thunk: { extraArgument: { repository } } }),
     devTools: __DEV__,
     enhancers: (getDefault) => getDefault({ autoBatch: true }),
   });

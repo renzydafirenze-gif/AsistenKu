@@ -48,8 +48,8 @@ Legend: `[x]` done and verified locally · `[~]` done with a documented limit ·
 - [x] **Subject & Teacher List**: CRUD subjects, assign teachers, display in dashboard.
 - [x] **School Activity Reminders**: Add events, set reminders, push notifications.
       Backend notifications + scheduler endpoint; app does not register push tokens yet.
-- [~] Implement offline caching (SQLite) for critical data.
-      Local‑first cache on AsyncStorage with a bundled dataset (`frontend/src/offline`); WatermelonDB not used.
+- [x] Implement offline caching (SQLite) for critical data.
+      The app is fully offline: bundled dataset persisted in AsyncStorage (`frontend/src/offline`), no API client and no INTERNET permission. SQLite/WatermelonDB not used.
 - [x] Add server‑side validation for all inputs.
 
 ## Phase 4: Business Rules & Invariants
@@ -67,8 +67,8 @@ Legend: `[x]` done and verified locally · `[~]` done with a documented limit ·
 - [x] Ensure accessibility (contrast, screen‑reader labels, touch targets).
       Contrast gate in `frontend/tests/contrast.test.ts`, roles/labels/48dp targets in components.
 - [x] Add smooth navigation (React Navigation) and state management (Redux Toolkit).
-- [~] Integrate push‑notification handling in the app.
-      Backend endpoints ready; device token registration and handlers still missing.
+- [ ] Integrate push‑notification handling in the app.
+      Deliberately out of scope for the offline build; backend push providers exist.
 - [ ] Conduct usability tests with a small student group.
 
 ## Phase 6: Testing, Hardening & Deployment
@@ -81,7 +81,7 @@ Legend: `[x]` done and verified locally · `[~]` done with a documented limit ·
       `tests/perf/latency.test.ts` (p95 < 200 ms) + `perf/k6/duty.js` for a deployed stack.
 - [x] Configure CI to run tests, lint, and build.
 - [~] Build release binaries for iOS (App Store) and Android (Play Store).
-      Android release APK builds and installs (debug keystore, cleartext demo config); no iOS build, no store signing.
+      Android release APK builds and installs offline (debug keystore); no iOS build, no store signing.
 - [ ] Set up production PostgreSQL, environment variables, and SSL.
 - [ ] Deploy backend to a managed service (Heroku, Render, or AWS Elastic Beanstalk).
 - [ ] Monitor logs and set up alerts.
