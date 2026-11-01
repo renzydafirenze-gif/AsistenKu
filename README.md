@@ -1,8 +1,12 @@
-# AsistenSiswa
+# AsistenKu (AKU)
 
-Mobile assistant for Indonesian high-school students: duty roster (piket) with
-H-1 reminders, uniform checklist tied to the academic calendar, homework with
-late-work rules, exam calendar, subjects and teachers.
+Offline mobile assistant for Indonesian high-school students: duty roster
+(piket), uniform checklist tied to the academic calendar, homework with
+late-work rules, exam calendar, subjects and teachers. Everything runs on the
+device — no account, no server, no INTERNET permission.
+
+The `backend/` folder is a reference REST API kept for a future online mode; the
+shipped app never calls it.
 
 | Part | Stack | Docs |
 | --- | --- | --- |

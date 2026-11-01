@@ -8,6 +8,7 @@ import { DutyScreen } from '../src/screens/DutyScreen';
 import { ExamScreen } from '../src/screens/ExamScreen';
 import { HomeworkScreen } from '../src/screens/HomeworkScreen';
 import { UniformScreen } from '../src/screens/UniformScreen';
+import { SubjectsScreen } from '../src/screens/SubjectsScreen';
 import { RootNavigator } from '../src/navigation/RootNavigator';
 import { createOfflineStorage } from '../src/offline/storage';
 import { createDemoDataset } from '../src/offline/seed';
@@ -72,7 +73,16 @@ describe('dashboard screen', () => {
     fireEvent.press(getByTestId('dashboard-card-homework'));
     expect(mockNavigate).toHaveBeenCalledWith('Homework');
 
+    fireEvent.press(getByTestId('dashboard-card-subjects'));
+    expect(mockNavigate).toHaveBeenCalledWith('Subjects');
+
     expect((await findAllByText('Terlambat')).length).toBeGreaterThan(0);
+  });
+
+  it('offers the local-data footer and reset action', async () => {
+    const { findByText, findByLabelText } = renderScreen(<DashboardScreen />);
+    expect(await findByText(/AsistenKu \(AKU\)/)).toBeOnTheScreen();
+    expect(await findByLabelText('Reset data contoh')).toBeOnTheScreen();
   });
 
   it('shows the uniform summary from the local dataset', async () => {
@@ -128,6 +138,16 @@ describe('exam screen', () => {
   });
 });
 
+describe('subjects screen', () => {
+  it('lists every mapel with its teacher', async () => {
+    const { findByText, getAllByText } = renderScreen(<SubjectsScreen />);
+    expect(await findByText('Matematika')).toBeOnTheScreen();
+    expect(await findByText('IPA Terpadu')).toBeOnTheScreen();
+    expect(await findByText('3 mapel · guru pengampu')).toBeOnTheScreen();
+    expect(getAllByText('Sari Wulandari').length).toBe(3);
+  });
+});
+
 describe('uniform screen', () => {
   it('toggles an item and updates progress', async () => {
     const store = makeStore();
@@ -166,6 +186,7 @@ describe('root navigator', () => {
     expect(await findByText(/^Selamat (pagi|siang|sore|malam)$/)).toBeOnTheScreen();
     expect((await findAllByText('Seragam')).length).toBeGreaterThan(0);
     expect((await findAllByText('Piket')).length).toBeGreaterThan(0);
+    expect((await findAllByText('Mapel')).length).toBeGreaterThan(0);
   });
 
   it('never renders an auth screen', () => {

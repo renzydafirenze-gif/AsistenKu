@@ -74,6 +74,13 @@ export const toggleUniform = createAsyncThunk<
   extra.repository.toggleUniform(date, itemKey, checked),
 );
 
+export const resetDataset = createAsyncThunk<void, void, { extra: DataDeps }>(
+  'data/reset',
+  async (_arg, { extra }) => {
+    await extra.repository.reset();
+  },
+);
+
 const dataSlice = createSlice({
   name: 'data',
   initialState,
@@ -158,7 +165,9 @@ const dataSlice = createSlice({
       })
       .addCase(toggleUniform.rejected, (state, action) => {
         state.uniform.error = describe(action.error);
-      });
+      })
+      // Back to `idle` so every mounted screen reloads from the fresh seed.
+      .addCase(resetDataset.fulfilled, () => initialState);
   },
 });
 

@@ -1,13 +1,15 @@
 {
   "expo": {
-    "name": "AsistenSiswa",
-    "slug": "asistensiswa",
-    "version": "0.1.0",
+    "name": "AsistenKu",
+    "slug": "asistenku",
+    "version": "0.2.0",
     "orientation": "portrait",
-    "scheme": "asistensiswa",
+    "scheme": "asistenku",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
+    "icon": "./assets/icon.png",
     "splash": {
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#2E86C1"
     },
@@ -16,7 +18,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "id.sch.asistensiswa",
+      "bundleIdentifier": "id.sch.asistenku",
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false
@@ -24,8 +26,9 @@
       }
     },
     "android": {
-      "package": "id.sch.asistensiswa",
+      "package": "id.sch.asistenku",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#2E86C1"
       },
       "blockedPermissions": [

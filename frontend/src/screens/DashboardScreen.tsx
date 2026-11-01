@@ -1,16 +1,17 @@
 import React, { useCallback, useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
+import { PrimaryButton } from '../components/PrimaryButton';
 import { Screen } from '../components/Screen';
 import { StatusBadge } from '../components/StatusBadge';
 import type { DashboardCard } from '../api/types';
 import type { MainTabParams } from '../navigation/RootNavigator';
 import { useAppDispatch, useAppSelector } from '../store';
-import { loadDashboard } from '../store/dataSlice';
+import { loadDashboard, resetDataset } from '../store/dataSlice';
 import { useTheme } from '../theme/ThemeProvider';
 import { formatIndonesianDay, formatDateKey, greetingForHour, relativeDayLabel } from '../utils/format';
 
@@ -19,7 +20,7 @@ const ROUTE_BY_CARD: Record<DashboardCard['key'], keyof MainTabParams> = {
   uniform: 'Uniform',
   homework: 'Homework',
   exam: 'Exam',
-  subjects: 'Dashboard',
+  subjects: 'Subjects',
 };
 
 export function DashboardScreen() {
@@ -36,6 +37,17 @@ export function DashboardScreen() {
   useEffect(() => {
     if (status === 'idle') refresh();
   }, [refresh, status]);
+
+  const confirmReset = useCallback(() => {
+    Alert.alert(
+      'Reset data contoh',
+      'Semua centang seragam dan status piket kembali ke data awal. Lanjutkan?',
+      [
+        { text: 'Batal', style: 'cancel' },
+        { text: 'Reset', style: 'destructive', onPress: () => void dispatch(resetDataset()) },
+      ],
+    );
+  }, [dispatch]);
 
   const greeting = data?.greeting ?? greetingForHour(new Date().getHours());
   const lateCount = data?.detail?.homework?.lateCount ?? 0;
@@ -97,10 +109,24 @@ export function DashboardScreen() {
           onPress={() => navigation.navigate('Uniform')}
         />
       ) : null}
+
+      <View style={styles.footer}>
+        <Text style={[styles.brand, { color: theme.colors.textMuted }]}>
+          AsistenKu (AKU) · data tersimpan di perangkat
+        </Text>
+        <PrimaryButton
+          label="Reset data contoh"
+          tone="ghost"
+          onPress={confirmReset}
+          accessibilityHint="Mengembalikan data ke kondisi awal"
+        />
+      </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   inlineBadge: { marginTop: 6 },
+  footer: { marginTop: 12, gap: 8, alignItems: 'stretch' },
+  brand: { fontSize: 12, textAlign: 'center' },
 });

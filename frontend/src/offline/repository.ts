@@ -29,6 +29,8 @@ export interface Repository {
   subjects(): Promise<Page<Subject>>;
   uniformChecklist(date?: string): Promise<UniformChecklist>;
   toggleUniform(date: string, itemKey: string, checked: boolean): Promise<UniformChecklist>;
+  /** Drops local edits and re-seeds from the bundled dataset. */
+  reset(): Promise<void>;
 }
 
 export function createRepository(storage: OfflineStorage): Repository {
@@ -88,6 +90,10 @@ export function createRepository(storage: OfflineStorage): Repository {
       const checklist = demoUniform(date, checkedKeys);
       await storage.save({ ...dataset, uniform: checklist });
       return checklist;
+    },
+
+    reset: async () => {
+      await storage.reset();
     },
   };
 }

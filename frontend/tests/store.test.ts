@@ -10,6 +10,7 @@ import {
   loadSubjects,
   loadUniform,
   resetData,
+  resetDataset,
   toggleUniform,
 } from '../src/store/dataSlice';
 
@@ -112,6 +113,19 @@ describe('data slice (local)', () => {
 
     expect(store.getState().data.duties.data).toHaveLength(0);
     expect(store.getState().data.duties.status).toBe('idle');
+  });
+
+  it('reloads the seed after a dataset reset', async () => {
+    const store = makeStore();
+    await store.dispatch(loadDuties());
+    const todayDuty = store.getState().data.duties.data.find((duty) => duty.status === 'TODAY')!;
+    await store.dispatch(completeDuty(todayDuty.id));
+
+    await store.dispatch(resetDataset());
+    expect(store.getState().data.duties.status).toBe('idle');
+
+    await store.dispatch(loadDuties());
+    expect(store.getState().data.duties.data.find((duty) => duty.id === todayDuty.id)?.status).toBe('TODAY');
   });
 
   it('keeps the seeded dataset stable between stores', async () => {

@@ -17,8 +17,8 @@ Legend: `[x]` done and verified locally · `[~]` done with a documented limit ·
 
 # Phase Breakdown & Actionable Tasks
 ## Phase 1: Setup & Foundations
-- [ ] Initialise Git repo and create CI/CD pipeline (GitHub Actions).
-      CI workflow exists (`.github/workflows/ci.yml`, backend + app jobs); repo itself is not initialised yet.
+- [x] Initialise Git repo and create CI/CD pipeline (GitHub Actions).
+      Repo initialised; CI workflow (`.github/workflows/ci.yml`, backend + app jobs) present.
 - [x] Scaffold Node.js backend with Express, TypeScript, ESLint, Prettier.
 - [x] Scaffold React Native project (Expo or bare) with TypeScript, ESLint.
 - [x] Configure PostgreSQL local dev instance and Docker Compose.
@@ -46,6 +46,7 @@ Legend: `[x]` done and verified locally · `[~]` done with a documented limit ·
 - [x] **Exam Calendar**: Publish exam dates; display in calendar view; prevent edits after publish.
       List view in the app; no month grid yet.
 - [x] **Subject & Teacher List**: CRUD subjects, assign teachers, display in dashboard.
+      App has a dedicated Mapel tab listing every subject with its teacher.
 - [x] **School Activity Reminders**: Add events, set reminders, push notifications.
       Backend notifications + scheduler endpoint; app does not register push tokens yet.
 - [x] Implement offline caching (SQLite) for critical data.

@@ -1,8 +1,8 @@
-# AsistenSiswa — Mobile App
+# AsistenKu (AKU) — Mobile App
 
 Expo (SDK 50, React Native 0.73.6) + TypeScript app. Students see today's duty,
-uniform checklist, homework and exam schedule; late homework is red, published
-exams are read-only.
+uniform checklist, homework, exam schedule and subjects; late homework is red,
+published exams are read-only.
 
 **Fully offline.** The app has no API client, no login and no INTERNET
 permission — every screen reads and writes a dataset bundled in the APK.
@@ -34,13 +34,13 @@ variables.
 ## Structure
 
 ```
-App.tsx                     providers (store, theme, safe area), session restore
+App.tsx                     providers (store, theme, safe area)
 src/
 ├─ api/        types.ts (shared model types)
 ├─ components/ Screen, Card, StatusBadge, ChecklistRow, PrimaryButton, EmptyState
 ├─ navigation/ RootNavigator (lazy bottom tabs, no auth stack)
 ├─ offline/    seed.ts (bundled dataset), storage.ts (AsyncStorage), repository.ts
-├─ screens/    Dashboard, Duty, Homework, Exam, Uniform
+├─ screens/    Dashboard, Duty, Homework, Exam, Uniform, Subjects
 ├─ store/      Redux Toolkit data slice
 ├─ theme/      tokens (light/dark), WCAG contrast helpers
 └─ utils/      Indonesian date/clock/relative-day formatting
@@ -50,11 +50,13 @@ src/
 
 `src/offline/seed.ts` is the dataset (dates are relative to today, so the app
 always looks current). `storage.ts` seeds AsyncStorage once and persists
-mutations; `repository.ts` is the only data source — no fetch, no server.
+mutations, rolling the uniform checklist over at midnight; `repository.ts` is
+the only data source — no fetch, no server.
 
 Completing a duty or ticking a uniform item writes straight to the device store
-and survives restarts. `android.blockedPermissions` removes INTERNET, so the
-APK cannot reach a network even by accident.
+and survives restarts. "Reset data contoh" on the dashboard restores the seed.
+`android.blockedPermissions` removes INTERNET, so the APK cannot reach a network
+even by accident.
 
 ponytail: data is device-local. Add export/import or a sync layer when it must
 move between devices.
@@ -83,13 +85,20 @@ red. Colour is never the only signal — every card carries a text badge.
 ## Testing
 
 ```bash
-npm test                  # 51 tests, 6 suites
+npm test                  # 56 tests, 6 suites
 npm run test:coverage     # gate: statements 80, branches 70, functions 80, lines 80
 ```
 
-Screens are rendered through the real store with a fake `Api` implementation, so
-thunks, loading and error states are exercised rather than mocked away.
+Screens are rendered through the real store backed by in-memory AsyncStorage, so
+thunks, persistence, loading and error states are exercised rather than mocked
+away.
 `tests/contrast.test.ts` is the a11y regression gate for the palette.
+
+## Brand assets
+
+`python3 scripts/make-icon.py` regenerates `assets/icon.png`,
+`adaptive-icon.png`, `splash.png` and `favicon.png` from code (Pillow, Gabarito
+font). Colours match `src/theme/tokens.ts`.
 
 ## Build an APK locally
 
@@ -98,7 +107,7 @@ Requires JDK 17 and Android SDK 34 (`ANDROID_HOME` set). No Expo account needed.
 ```bash
 npx expo prebuild -p android
 cd android && ./gradlew clean assembleRelease
-# -> app/build/outputs/apk/release/app-release.apk
+# -> app/build/outputs/apk/release/app-release.apk  (id.sch.asistenku)
 ```
 
 The generated project signs release builds with the debug keystore, so the APK

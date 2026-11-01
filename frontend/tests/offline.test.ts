@@ -1,5 +1,5 @@
 import { createRepository } from '../src/offline/repository';
-import { buildOfflineDashboard, createDemoDataset } from '../src/offline/seed';
+import { buildOfflineDashboard, createDemoDataset, demoUniform } from '../src/offline/seed';
 import { createOfflineStorage } from '../src/offline/storage';
 import { addDaysKey, formatDateKey } from '../src/utils/format';
 
@@ -56,9 +56,26 @@ describe('offline storage', () => {
     expect((await second.load()).uniform.completedCount).toBe(2);
   });
 
+  it('resets the uniform checklist when the stored day is old', async () => {
+    const backend = memoryBackend();
+    const seeded = createDemoDataset(NOW);
+    await backend.setItem(
+      'asistenku.dataset.v1',
+      JSON.stringify({ ...seeded, uniform: demoUniform(addDaysKey(TODAY, -3), ['shirt']) }),
+    );
+
+    const storage = createOfflineStorage(backend);
+    const dataset = await storage.load();
+    expect(dataset.uniform.date).toBe(formatDateKey(new Date()));
+    expect(dataset.uniform.completedCount).toBe(0);
+    // Rollover is written back, so the next launch reads the fresh checklist.
+    const persisted = JSON.parse((await backend.getItem('asistenku.dataset.v1'))!);
+    expect(persisted.uniform.date).toBe(formatDateKey(new Date()));
+  });
+
   it('recovers from a corrupt payload', async () => {
     const backend = memoryBackend();
-    await backend.setItem('asistensiswa.dataset.v1', '{oops');
+    await backend.setItem('asistenku.dataset.v1', '{oops');
 
     const storage = createOfflineStorage(backend);
     expect((await storage.load()).user.email).toBe('ani@sekolah.test');
@@ -119,6 +136,20 @@ describe('local repository', () => {
     const second = await repository.toggleUniform(TODAY, 'tie', true);
     expect(second.completedCount).toBe(2);
     expect(second.items.find((item) => item.key === 'shirt')?.checked).toBe(true);
+  });
+
+  it('re-seeds everything on reset', async () => {
+    const storage = createOfflineStorage(memoryBackend());
+    const repository = createRepository(storage);
+    const dataset = await storage.load();
+    await repository.completeDuty(dataset.duties[1]!.id);
+    await repository.toggleUniform(TODAY, 'shirt', true);
+
+    await repository.reset();
+
+    const duties = (await repository.duties()).items;
+    expect(duties.find((duty) => duty.status === 'TODAY')).toBeTruthy();
+    expect((await repository.uniformChecklist()).completedCount).toBe(0);
   });
 
   it('returns an empty checklist for another day', async () => {

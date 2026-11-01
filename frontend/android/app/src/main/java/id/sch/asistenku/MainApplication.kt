@@ -1,4 +1,4 @@
-package id.sch.asistensiswa
+package id.sch.asistenku
 
 import android.app.Application
 import android.content.res.Configuration
