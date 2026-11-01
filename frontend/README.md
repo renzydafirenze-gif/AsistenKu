@@ -38,7 +38,8 @@ variables.
 App.tsx                     providers (store, theme, safe area)
 src/
 ├─ api/        types.ts (shared model types)
-├─ components/ Screen, Card, CardActions, StatusBadge, ChecklistRow, TextField, …
+├─ components/ Screen, Sheet, ListRow, SectionHeader, SegmentedControl, StatTile,
+│              ProgressBar, Fab, EmptyState, ChecklistRow, TextField, ...
 ├─ navigation/ RootNavigator (lazy bottom tabs, no auth stack)
 ├─ offline/    seed.ts (empty/demo data + date derivation), storage.ts, repository.ts
 ├─ screens/    Dashboard (+ Pengaturan), Duty, Homework, Exam, Uniform, Subjects
@@ -57,8 +58,10 @@ and subjects. `repository.ts` is the only data source and owns every rule:
   itself and past homework turns late without any cron job;
 - late homework cannot be deleted and stays red after submission;
 - a published exam is locked — no edit, no delete;
-- `clearAll()` empties everything, `loadDemo()` loads the example dataset
-  (both reachable from Pengaturan on the dashboard).
+- typing a subject on a PR or ujian links it to the mapel list, creating the
+  mapel on first use, so the list and the rows never disagree;
+- `clearAll()` drops schedules, PR, exams and mapel but keeps the student's
+  name; `loadDemo()` loads the example dataset (both from Pengaturan).
 
 `storage.ts` persists to AsyncStorage under `asistenku.dataset.v2` and rolls the
 uniform checklist over at midnight. After every mutation `refreshAll` reloads
@@ -117,6 +120,15 @@ Hardening added after the first real-device pass:
   ignore taps while a mutation is in flight.
 - **Error boundary** around the navigator: a render crash offers "Coba lagi"
   instead of a white screen; data on disk is untouched.
+- **No empty-state flash**: the store starts in `loading`, so a cold start never
+  shows "belum ada ..." for one frame before the local read finishes.
+- **Mapel stay unique by name**, because that name is what links PR/ujian to the
+  subject list.
+
+Checked on an Android 10 x86_64 emulator (`asistenku-0.4.2.apk`): cold start,
+create/edit/delete for piket, PR, ujian and mapel, publish-then-locked, late PR
+without delete, uniform ticks, rename, demo load, clear-all, validation alerts,
+keyboard-open sheets, force-stop restart — no crash in `logcat`.
 
 ### Accessibility
 
@@ -137,7 +149,7 @@ Hardening added after the first real-device pass:
 ## Testing
 
 ```bash
-npm test                  # 81 tests, 6 suites
+npm test                  # 83 tests, 6 suites
 npm run test:coverage     # gate: statements 80, branches 70, functions 80, lines 80
 ```
 

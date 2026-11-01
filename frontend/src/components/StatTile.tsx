@@ -25,7 +25,7 @@ export function StatTile({ label, value, hint, tone, onPress, testID }: StatTile
           backgroundColor: theme.colors.surface,
           borderColor: theme.colors.border,
           borderRadius: theme.radius.md,
-          padding: theme.spacing(3),
+          padding: theme.spacing(2),
         },
       ]}
     >
@@ -33,11 +33,14 @@ export function StatTile({ label, value, hint, tone, onPress, testID }: StatTile
       <Text style={[theme.typography.caption, { color: theme.colors.textMuted }]} numberOfLines={1}>
         {label}
       </Text>
-      <Text style={[theme.typography.title, styles.value, { color: theme.colors.text }]} numberOfLines={1}>
+      <Text
+        style={[theme.typography.title, styles.value, { color: theme.colors.text }]}
+        numberOfLines={2}
+      >
         {value}
       </Text>
       {hint ? (
-        <Text style={[theme.typography.caption, { color: theme.colors.textMuted }]} numberOfLines={1}>
+        <Text style={[theme.typography.caption, { color: theme.colors.textMuted }]} numberOfLines={2}>
           {hint}
         </Text>
       ) : null}

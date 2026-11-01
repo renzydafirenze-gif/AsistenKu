@@ -15,6 +15,7 @@ import {
   createEmptyDataset,
   demoUniform,
   deriveDataset,
+  type OfflineDataset,
 } from './seed';
 import type { OfflineStorage } from './storage';
 
@@ -83,11 +84,42 @@ function requireTime(value: string, label: string): string {
   return trimmed;
 }
 
-function subjectRef(name: string): Homework['subject'] {
+function codeFrom(name: string): string {
+  return name.replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase() || 'MAP';
+}
+
+/**
+ * Links a typed subject name to the mapel list, adding the mapel on first use.
+ * Fabricating an id would leave the mapel list empty while PR/ujian still
+ * showed a subject, and two names sharing three letters collided.
+ */
+function resolveSubject(
+  dataset: OfflineDataset,
+  name: string,
+): { subject: Homework['subject']; subjects: Subject[] } {
   const trimmed = name.trim();
-  if (!trimmed) return null;
-  const code = trimmed.replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase() || 'MAP';
-  return { id: `subject-${code.toLowerCase()}`, name: trimmed, code };
+  if (!trimmed) return { subject: null, subjects: dataset.subjects };
+
+  const existing = dataset.subjects.find(
+    (item) => item.name.toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (existing) {
+    return {
+      subject: { id: existing.id, name: existing.name, code: existing.code },
+      subjects: dataset.subjects,
+    };
+  }
+
+  const created: Subject = {
+    id: newId('subject'),
+    code: codeFrom(trimmed),
+    name: trimmed,
+    teacher: null,
+  };
+  return {
+    subject: { id: created.id, name: created.name, code: created.code },
+    subjects: [...dataset.subjects, created],
+  };
 }
 
 /**
@@ -197,17 +229,19 @@ export function createRepository(storage: OfflineStorage): Repository {
       const dueDate = requireDate(input.dueDate, 'Tenggat');
       const existing = id ? dataset.homework.find((item) => item.id === id) : undefined;
       if (id && !existing) throw new Error('PR tidak ditemukan.');
+      const { subject, subjects } = resolveSubject(dataset, input.subjectName);
 
       const homework: Homework = {
         id: existing?.id ?? newId('hw'),
         title,
         description: input.description.trim() || null,
         dueDate: `${dueDate}T17:00:00.000Z`,
-        subject: subjectRef(input.subjectName),
+        subject,
         assignment: existing?.assignment ?? { status: 'PENDING' },
       };
       await storage.save({
         ...dataset,
+        subjects,
         homework: existing
           ? dataset.homework.map((item) => (item.id === homework.id ? homework : item))
           : [...dataset.homework, homework],
@@ -254,6 +288,7 @@ export function createRepository(storage: OfflineStorage): Repository {
       const existing = id ? dataset.exams.find((item) => item.id === id) : undefined;
       if (existing?.isLocked) throw new Error('Ujian terpublikasi tidak bisa diubah.');
       if (id && !existing) throw new Error('Ujian tidak ditemukan.');
+      const { subject, subjects } = resolveSubject(dataset, input.subjectName);
 
       const exam: Exam = {
         id: existing?.id ?? newId('exam'),
@@ -262,12 +297,13 @@ export function createRepository(storage: OfflineStorage): Repository {
         startTime,
         endTime,
         room: input.room.trim() || null,
-        subject: subjectRef(input.subjectName),
+        subject,
         isPublished: false,
         isLocked: false,
       };
       await storage.save({
         ...dataset,
+        subjects,
         exams: existing
           ? dataset.exams.map((item) => (item.id === exam.id ? exam : item))
           : [...dataset.exams, exam],
@@ -307,6 +343,11 @@ export function createRepository(storage: OfflineStorage): Repository {
       const code = requireText(input.code, 'Kode mapel').toUpperCase();
       const existing = id ? dataset.subjects.find((item) => item.id === id) : undefined;
       if (id && !existing) throw new Error('Mata pelajaran tidak ditemukan.');
+      // Names identify mapel when linking PR/ujian, so they must stay unique.
+      const clash = dataset.subjects.find(
+        (item) => item.id !== id && item.name.toLowerCase() === name.toLowerCase(),
+      );
+      if (clash) throw new Error('Mapel dengan nama itu sudah ada.');
 
       const teacherName = input.teacherName.trim();
       const subject: Subject = {
@@ -362,7 +403,9 @@ export function createRepository(storage: OfflineStorage): Repository {
     },
 
     clearAll: async () => {
-      await storage.save(createEmptyDataset());
+      const dataset = await load();
+      // The sheet only promises to clear schedules and mapel, so the name stays.
+      await storage.save({ ...createEmptyDataset(), user: dataset.user });
     },
 
     loadDemo: async () => {

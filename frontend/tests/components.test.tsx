@@ -14,7 +14,6 @@ import { SectionHeader } from '../src/components/SectionHeader';
 import { SegmentedControl } from '../src/components/SegmentedControl';
 import { Sheet } from '../src/components/Sheet';
 import { StatTile } from '../src/components/StatTile';
-import { StatusDot } from '../src/components/StatusDot';
 import { TextField } from '../src/components/TextField';
 import { ThemeProvider } from '../src/theme/ThemeProvider';
 import { lightTheme } from '../src/theme/tokens';
@@ -69,12 +68,6 @@ describe('components', () => {
     expect(row).toHaveProp('accessibilityLabel', 'Ulangan harian. Matematika · 07:30–09:00. Besok');
     fireEvent.press(row);
     expect(onPress).toHaveBeenCalledTimes(1);
-  });
-
-  it('writes the status next to the coloured dot', () => {
-    const { getByLabelText, getByText } = wrap(<StatusDot status="OVERDUE" />);
-    expect(getByLabelText('Status Terlewat')).toBeOnTheScreen();
-    expect(getByText('Terlewat')).toBeOnTheScreen();
   });
 
   it('shows section headers with an optional count', () => {

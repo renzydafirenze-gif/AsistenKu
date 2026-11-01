@@ -21,12 +21,14 @@ export interface DataState {
 }
 
 const initialState: DataState = {
-  dashboard: { data: null, status: 'idle', error: null },
-  duties: { data: [], status: 'idle', error: null },
-  homework: { data: [], status: 'idle', error: null },
-  exams: { data: [], status: 'idle', error: null },
-  subjects: { data: [], status: 'idle', error: null },
-  uniform: { data: null, status: 'idle', error: null },
+  // Screens show their list right away, so start in `loading`: otherwise the
+  // empty state flashes for one frame before the first read finishes.
+  dashboard: { data: null, status: 'loading', error: null },
+  duties: { data: [], status: 'loading', error: null },
+  homework: { data: [], status: 'loading', error: null },
+  exams: { data: [], status: 'loading', error: null },
+  subjects: { data: [], status: 'loading', error: null },
+  uniform: { data: null, status: 'loading', error: null },
 };
 
 interface DataDeps {

@@ -143,7 +143,8 @@ describe('data slice (local)', () => {
 
     await store.dispatch(clearAll());
     expect(store.getState().data.duties.data).toEqual([]);
-    expect(store.getState().data.dashboard.data?.user.fullName).toBe('Siswa');
+    // Clearing schedules keeps the name the student set.
+    expect(store.getState().data.dashboard.data?.user.fullName).toBe('Budi');
   });
 
   it('persists a uniform toggle', async () => {

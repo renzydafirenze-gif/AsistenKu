@@ -79,7 +79,7 @@ export function DashboardScreen() {
   };
 
   const confirmClear = () => {
-    Alert.alert('Kosongkan semua data?', 'Jadwal, PR, ujian, dan mapel akan dihapus.', [
+    Alert.alert('Kosongkan semua data?', 'Jadwal, PR, ujian, dan mapel akan dihapus. Namamu tetap tersimpan.', [
       { text: 'Batal', style: 'cancel' },
       {
         text: 'Kosongkan',
@@ -113,14 +113,19 @@ export function DashboardScreen() {
             ? `Bertugas · ${detail.duty.assignedStudentName}`
             : 'Piket hari ini',
           detail: detail.duty.notes ?? undefined,
+          tone: dutyTone.background,
           onPress: () => navigation.navigate('Duty'),
         }
       : null,
     ...dueToday.slice(0, 3).map((item) => ({
       key: `hw-${item.id}`,
       title: item.title,
-      meta: `${item.subject?.name ?? 'Tanpa mapel'} · tenggat ${formatIndonesianDate(item.dueDate.slice(0, 10))}`,
+      // Late work is called out here too, not only on the PR tab.
+      meta: `${item.subject?.name ?? 'Tanpa mapel'} · ${
+        item.isLate ? 'terlambat' : 'tenggat'
+      } ${formatIndonesianDate(item.dueDate.slice(0, 10))}`,
       detail: undefined,
+      tone: item.isLate ? theme.colors.danger : theme.colors.primary,
       onPress: () => navigation.navigate('Homework'),
     })),
     nextExam && nextExam.examDate === today
@@ -129,6 +134,7 @@ export function DashboardScreen() {
           title: nextExam.title,
           meta: `${nextExam.startTime}–${nextExam.endTime}${nextExam.room ? ` · ${nextExam.room}` : ''}`,
           detail: undefined,
+          tone: theme.colors.secondary,
           onPress: () => navigation.navigate('Exam'),
         }
       : null,
@@ -137,6 +143,7 @@ export function DashboardScreen() {
     title: string;
     meta: string;
     detail?: string;
+    tone: string;
     onPress: () => void;
   }>;
 
@@ -211,6 +218,7 @@ export function DashboardScreen() {
             title={item.title}
             meta={item.meta}
             detail={item.detail}
+            tone={item.tone}
             onPress={item.onPress}
             accessibilityHint="Membuka halaman terkait"
           />
@@ -271,7 +279,7 @@ export function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  stats: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  stats: { flexDirection: 'row', gap: 8, marginTop: 4 },
   gear: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   footer: { textAlign: 'center', marginTop: 16 },
 });

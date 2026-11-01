@@ -297,15 +297,75 @@ describe('subjects and profile', () => {
     expect((await repository.subjects()).items).toEqual([]);
   });
 
-  it('renames the student and clears everything', async () => {
+  it('renames the student and clears every schedule but the name', async () => {
     const repository = createRepository(createOfflineStorage(memoryBackend()));
     await repository.saveSubject({ name: 'IPA', code: 'IPA', teacherName: '', teacherEmail: '' });
+    await repository.saveDuty(dutyInput());
     await repository.updateProfile('  Budi  ');
 
     expect((await repository.dashboard()).user.fullName).toBe('Budi');
 
     await repository.clearAll();
-    expect((await repository.dashboard()).user.fullName).toBe('Siswa');
     expect((await repository.subjects()).items).toEqual([]);
+    expect((await repository.duties()).items).toEqual([]);
+    // "Kosongkan" only promises to drop schedules, so the profile survives.
+    expect((await repository.dashboard()).user.fullName).toBe('Budi');
+  });
+
+  it('refuses two mapel with the same name', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    await repository.saveSubject({ name: 'Matematika', code: 'MTK', teacherName: '', teacherEmail: '' });
+
+    await expect(
+      repository.saveSubject({ name: ' matematika ', code: 'MTK2', teacherName: '', teacherEmail: '' }),
+    ).rejects.toThrow('Mapel dengan nama itu sudah ada.');
+    expect((await repository.subjects()).items).toHaveLength(1);
+  });
+});
+
+describe('subject linking', () => {
+  it('adds the typed mapel once and reuses it for PR and ujian', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+
+    const homework = await repository.saveHomework({
+      title: 'Latihan',
+      subjectName: 'Matematika',
+      dueDate: TODAY,
+      description: '',
+    });
+    const exam = await repository.saveExam({
+      title: 'Ulangan',
+      subjectName: 'matematika',
+      examDate: TODAY,
+      startTime: '07:30',
+      endTime: '09:00',
+      room: '',
+    });
+
+    const subjects = (await repository.subjects()).items;
+    expect(subjects).toHaveLength(1);
+    expect(subjects[0]?.name).toBe('Matematika');
+    // Same record on both sides, so counts and names agree everywhere.
+    expect(homework.subject?.id).toBe(subjects[0]?.id);
+    expect(exam.subject?.id).toBe(subjects[0]?.id);
+  });
+
+  it('does not merge mapel that merely share a prefix', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    const first = await repository.saveHomework({
+      title: 'A',
+      subjectName: 'Matematika',
+      dueDate: TODAY,
+      description: '',
+    });
+    const second = await repository.saveHomework({
+      title: 'B',
+      subjectName: 'Matematika Wajib',
+      dueDate: TODAY,
+      description: '',
+    });
+
+    expect((await repository.subjects()).items).toHaveLength(2);
+    expect(first.subject?.id).not.toBe(second.subject?.id);
   });
 });
