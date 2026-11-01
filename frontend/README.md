@@ -1,11 +1,12 @@
 # AsistenKu (AKU) — Mobile App
 
-Expo (SDK 50, React Native 0.73.6) + TypeScript app. Students see today's duty,
-uniform checklist, homework, exam schedule and subjects; late homework is red,
-published exams are read-only.
+Expo (SDK 50, React Native 0.73.6) + TypeScript app that students fill in
+themselves: duty roster (piket), homework, exam schedule, subjects and teachers,
+plus a daily uniform checklist. Late homework is red and cannot be deleted;
+published exams are locked.
 
-**Fully offline.** The app has no API client, no login and no INTERNET
-permission — every screen reads and writes a dataset bundled in the APK.
+**Fully offline.** No API client, no login, no INTERNET permission. Every screen
+reads and writes the dataset stored on the phone; nothing leaves the device.
 
 > SDK 50 is the Expo release that pairs with RN 0.73.6. If the team pins SDK 49
 > instead, RN must move to 0.72.x.
@@ -37,36 +38,39 @@ variables.
 App.tsx                     providers (store, theme, safe area)
 src/
 ├─ api/        types.ts (shared model types)
-├─ components/ Screen, Card, StatusBadge, ChecklistRow, PrimaryButton, EmptyState
+├─ components/ Screen, Card, CardActions, StatusBadge, ChecklistRow, TextField, …
 ├─ navigation/ RootNavigator (lazy bottom tabs, no auth stack)
-├─ offline/    seed.ts (bundled dataset), storage.ts (AsyncStorage), repository.ts
-├─ screens/    Dashboard, Duty, Homework, Exam, Uniform, Subjects
-├─ store/      Redux Toolkit data slice
+├─ offline/    seed.ts (empty/demo data + date derivation), storage.ts, repository.ts
+├─ screens/    Dashboard (+ Pengaturan), Duty, Homework, Exam, Uniform, Subjects
+├─ store/      Redux Toolkit data slice (refreshAll + local mutations)
 ├─ theme/      tokens (light/dark), WCAG contrast helpers
 └─ utils/      Indonesian date/clock/relative-day formatting
 ```
 
 ### Data
 
-`src/offline/seed.ts` is the dataset (dates are relative to today, so the app
-always looks current). `storage.ts` seeds AsyncStorage once and persists
-mutations, rolling the uniform checklist over at midnight; `repository.ts` is
-the only data source — no fetch, no server.
+A fresh install starts **empty**: the student adds their own piket, PR, exams
+and subjects. `repository.ts` is the only data source and owns every rule:
 
-Completing a duty, submitting homework or ticking a uniform item writes straight
-to the device store and survives restarts; the dashboard reloads so its cards
-never show stale counts. "Reset data contoh" on the dashboard restores the seed.
-Late homework keeps its red status after submission and cannot be deleted.
-`android.blockedPermissions` removes INTERNET, so the APK cannot reach a network
-even by accident.
+- dates are validated (`YYYY-MM-DD`, `HH:MM`) before anything is stored;
+- duty status is derived from its date, so today's duty turns "Hari ini" by
+  itself and past homework turns late without any cron job;
+- late homework cannot be deleted and stays red after submission;
+- a published exam is locked — no edit, no delete;
+- `clearAll()` empties everything, `loadDemo()` loads the example dataset
+  (both reachable from Pengaturan on the dashboard).
 
-ponytail: data is device-local. Add export/import or a sync layer when it must
-move between devices.
+`storage.ts` persists to AsyncStorage under `asistenku.dataset.v2` and rolls the
+uniform checklist over at midnight. After every mutation `refreshAll` reloads
+the whole (small) dataset once, so the dashboard never shows stale counts.
+
+ponytail: data is device-local. Add export/import when it must move between
+phones.
 
 ### State
 
-`dataSlice` holds the loaded resources and their status. A storage failure
-surfaces as an error while keeping any previously loaded rows on screen.
+`dataSlice` keeps one status per resource; any storage failure surfaces as an
+error while keeping the previously loaded rows on screen.
 
 ### Accessibility
 
@@ -80,20 +84,20 @@ surfaces as an error while keeping any previously loaded rows on screen.
 
 ### Colour coding
 
-`statusTone()` maps server statuses (`COMPLETED`, `TODAY`, `OVERDUE`, `LATE`,
-`PARTIAL`, `HOLIDAY`, and the server's `accentColor` hex) to green / yellow /
-red. Colour is never the only signal — every card carries a text badge.
+`statusTone()` maps statuses (`COMPLETED`, `TODAY`, `OVERDUE`, `LATE`, `PARTIAL`,
+`HOLIDAY`, hex accents) to green / yellow / red. Colour is never the only signal
+— every card carries a text badge.
 
 ## Testing
 
 ```bash
-npm test                  # 60 tests, 6 suites
+npm test                  # 73 tests, 6 suites
 npm run test:coverage     # gate: statements 80, branches 70, functions 80, lines 80
 ```
 
 Screens are rendered through the real store backed by in-memory AsyncStorage, so
-thunks, persistence, loading and error states are exercised rather than mocked
-away.
+add/edit/delete flows, validation errors, persistence, loading and error states
+are exercised rather than mocked away.
 `tests/contrast.test.ts` is the a11y regression gate for the palette.
 
 ## Brand assets
@@ -120,4 +124,6 @@ change does not show up in the APK.
 ## Not built yet
 
 - Export/import or multi-device sync (data is device-local).
-- Detox E2E and store release pipelines (debug-signed demo APK only).
+- Detox E2E and store release pipelines (debug-signed APK only).
+- Weekly class timetable (jadwal pelajaran) — today the app covers piket and
+  exam schedules.

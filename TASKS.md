@@ -50,7 +50,7 @@ Legend: `[x]` done and verified locally · `[~]` done with a documented limit ·
 - [x] **School Activity Reminders**: Add events, set reminders, push notifications.
       Backend notifications + scheduler endpoint; app does not register push tokens yet.
 - [x] Implement offline caching (SQLite) for critical data.
-      The app is fully offline: bundled dataset persisted in AsyncStorage (`frontend/src/offline`), no API client and no INTERNET permission. SQLite/WatermelonDB not used.
+      The app is fully offline: user-owned dataset persisted in AsyncStorage (`frontend/src/offline`), no API client and no INTERNET permission. SQLite/WatermelonDB not used; the user can clear or load example data from Pengaturan.
 - [x] Add server‑side validation for all inputs.
 
 ## Phase 4: Business Rules & Invariants

@@ -74,13 +74,14 @@ export function Card({
   );
 
   const shell = (
-    <View style={[styles.shell, { borderLeftColor: accent }]}>{content}</View>
+    <View testID={testID} style={[styles.shell, { borderLeftColor: accent }]}>
+      {content}
+    </View>
   );
 
   if (!onPress) return shell;
   return (
     <Pressable
-      testID={testID}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}

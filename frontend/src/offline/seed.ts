@@ -7,15 +7,12 @@ import type {
   UniformChecklist,
   User,
 } from '../api/types';
-import { addDaysKey, formatDateKey } from '../utils/format';
+import { addDaysKey, daysBetween, formatDateKey } from '../utils/format';
 
 /**
- * Offline demo dataset. Dates are relative to the device's today, so the app
- * looks current whenever it is installed. Mirrors `backend/prisma/seed.ts` so
- * the offline and online experiences agree.
- *
- * ponytail: a bundled snapshot, not a synced replica. Replace with WatermelonDB
- * + /sync/push when offline edits must survive across devices.
+ * Local dataset. Everything the student sees is created by them on the device
+ * and persisted in AsyncStorage; `createDemoDataset` is only the optional
+ * example data reached from Pengaturan.
  */
 export interface OfflineDataset {
   user: User;
@@ -75,6 +72,60 @@ export function demoUniform(dateKey: string, checkedKeys: string[] = []): Unifor
         ? { label: 'Lengkap', color: '#27AE60' }
         : { label: `${completedCount}/${items.length}`, color: '#F39C12' },
   };
+}
+
+/** Fresh install: no schedules yet, only the profile placeholder. */
+export function createEmptyDataset(now: Date = new Date()): OfflineDataset {
+  return {
+    user: {
+      id: 'local-user',
+      email: '',
+      fullName: 'Siswa',
+      role: 'STUDENT',
+      classId: null,
+    },
+    duties: [],
+    homework: [],
+    exams: [],
+    subjects: [],
+    uniform: demoUniform(formatDateKey(now)),
+  };
+}
+
+/**
+ * Recomputes every date-relative field so stored rows never go stale: a duty
+ * becomes TODAY on its day, homework turns late on its own, exams count down.
+ */
+export function deriveDataset(dataset: OfflineDataset, now: Date = new Date()): OfflineDataset {
+  const today = formatDateKey(now);
+
+  const duties = dataset.duties.map((duty): Duty => {
+    const days = daysBetween(today, duty.date);
+    return {
+      ...duty,
+      status: duty.completedAt ? 'COMPLETED' : days < 0 ? 'OVERDUE' : days === 0 ? 'TODAY' : 'UPCOMING',
+      canComplete: !duty.completedAt && days <= 0,
+      countdown: {
+        days: Math.max(days, 0),
+        hours: Math.max(days, 0) * 24,
+        label: days <= 0 ? 'Hari ini' : `H-${days}`,
+        isPast: days < 0,
+      },
+    };
+  });
+
+  const homework = dataset.homework.map((item): Homework => {
+    const late = item.dueDate.slice(0, 10) < today;
+    const submitted = item.assignment?.status === 'SUBMITTED';
+    return { ...item, isLate: late, isOverdue: late && !submitted };
+  });
+
+  const exams = dataset.exams.map((exam): Exam => ({
+    ...exam,
+    daysUntil: daysBetween(today, exam.examDate),
+  }));
+
+  return { ...dataset, duties, homework, exams };
 }
 
 export function createDemoDataset(now: Date = new Date()): OfflineDataset {
@@ -214,7 +265,9 @@ export function buildOfflineDashboard(dataset: OfflineDataset, now: Date = new D
   const lateCount = dataset.homework.filter((item) => item.isLate).length;
   const pending = dataset.homework.filter((item) => item.assignment?.status !== 'SUBMITTED');
   const nextExam =
-    [...dataset.exams].sort((a, b) => a.examDate.localeCompare(b.examDate))[0] ?? null;
+    [...dataset.exams]
+      .sort((a, b) => a.examDate.localeCompare(b.examDate))
+      .find((exam) => exam.examDate >= todayKey) ?? null;
   const uniform = dataset.uniform;
 
   return {

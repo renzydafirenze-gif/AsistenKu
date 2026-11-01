@@ -6,7 +6,7 @@ import { EmptyState } from '../components/EmptyState';
 import { Screen } from '../components/Screen';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAppDispatch, useAppSelector } from '../store';
-import { loadDashboard, loadUniform, toggleUniform } from '../store/dataSlice';
+import { refreshAll, toggleUniform } from '../store/dataSlice';
 import { useTheme } from '../theme/ThemeProvider';
 import { formatDateKey, formatIndonesianDay } from '../utils/format';
 
@@ -17,12 +17,12 @@ export function UniformScreen() {
   const today = formatDateKey(new Date());
 
   const refresh = useCallback(() => {
-    void dispatch(loadUniform(today));
-  }, [dispatch, today]);
+    void dispatch(refreshAll());
+  }, [dispatch]);
 
   useEffect(() => {
-    if (status === 'idle') refresh();
-  }, [refresh, status]);
+    refresh();
+  }, [refresh]);
 
   const isHoliday = data?.status === 'HOLIDAY';
   const progress = data ? `${data.completedCount}/${data.total}` : '–';
@@ -70,10 +70,8 @@ export function UniformScreen() {
               category={item.category}
               checked={item.checked}
               disabled={status === 'loading'}
-              onToggle={async (checked) => {
-                await dispatch(toggleUniform({ date: data.date, itemKey: item.key, checked }));
-                // Keep the dashboard progress card in step with this checklist.
-                void dispatch(loadDashboard());
+              onToggle={(checked) => {
+                void dispatch(toggleUniform({ date: data.date, itemKey: item.key, checked }));
               }}
             />
           ))

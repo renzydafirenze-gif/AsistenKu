@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { formatDateKey } from '../utils/format';
-import { createDemoDataset, demoUniform, type OfflineDataset } from './seed';
+import { createEmptyDataset, demoUniform, type OfflineDataset } from './seed';
 
-const DATASET_KEY = 'asistenku.dataset.v1';
+export const DATASET_KEY = 'asistenku.dataset.v2';
 
 /** Ticks belong to the day they were made; a new day starts a clean checklist. */
 function rollUniformToToday(dataset: OfflineDataset): OfflineDataset {
@@ -40,7 +40,7 @@ export function createOfflineStorage(backend: Backend = AsyncStorage): OfflineSt
           await backend.removeItem(DATASET_KEY);
         }
       }
-      cache = createDemoDataset();
+      cache = createEmptyDataset();
       await backend.setItem(DATASET_KEY, JSON.stringify(cache));
       return cache;
     },

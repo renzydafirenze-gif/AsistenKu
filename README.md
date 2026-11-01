@@ -1,9 +1,9 @@
 # AsistenKu (AKU)
 
-Offline mobile assistant for Indonesian high-school students: duty roster
-(piket), uniform checklist tied to the academic calendar, homework with
-late-work rules, exam calendar, subjects and teachers. Everything runs on the
-device — no account, no server, no INTERNET permission.
+Offline mobile assistant for Indonesian high-school students. The student fills
+everything in on the phone: duty roster (piket), homework, exam schedule,
+subjects and teachers, plus a daily uniform checklist. No account, no server, no
+INTERNET permission — data never leaves the device.
 
 The `backend/` folder is a reference REST API kept for a future online mode; the
 shipped app never calls it.
@@ -61,9 +61,11 @@ the Prisma schema so no database service is needed on the runner.
 ## Status
 
 Implemented and tested: backend API (auth/RBAC, all Phase 3–4 features, sync,
-push providers, migrations, OpenAPI, Docker, CI) and the app (dashboard, duty,
-homework, exams, uniform, light/dark WCAG-checked theme) running entirely on a
-bundled local dataset — the APK ships without the INTERNET permission.
+push providers, migrations, OpenAPI, Docker, CI) and the app (dashboard, CRUD for
+duty/homework/exams/subjects, uniform checklist, Pengaturan with clear/demo data,
+light/dark WCAG-checked theme) running entirely on local storage — the APK ships
+without the INTERNET permission. The backend is a reference for a future online
+mode and is not used by the app.
 
 Not yet: data export/import or multi-device sync, Detox E2E, store release
 pipelines.

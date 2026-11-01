@@ -1,6 +1,12 @@
 import { createRepository } from '../src/offline/repository';
-import { buildOfflineDashboard, createDemoDataset, demoUniform } from '../src/offline/seed';
-import { createOfflineStorage } from '../src/offline/storage';
+import {
+  buildOfflineDashboard,
+  createDemoDataset,
+  createEmptyDataset,
+  demoUniform,
+  deriveDataset,
+} from '../src/offline/seed';
+import { createOfflineStorage, DATASET_KEY } from '../src/offline/storage';
 import { addDaysKey, formatDateKey } from '../src/utils/format';
 
 const NOW = new Date(2026, 10, 1, 9, 0, 0);
@@ -9,6 +15,7 @@ const TODAY = formatDateKey(NOW);
 function memoryBackend() {
   const data = new Map<string, string>();
   return {
+    data,
     getItem: async (key: string) => data.get(key) ?? null,
     setItem: async (key: string, value: string) => {
       data.set(key, value);
@@ -19,29 +26,71 @@ function memoryBackend() {
   };
 }
 
-describe('offline dataset', () => {
-  it('builds relative dates so the demo always looks current', () => {
-    const dataset = createDemoDataset(NOW);
-    expect(dataset.duties.map((duty) => duty.date)).toEqual([
-      addDaysKey(TODAY, -1),
-      TODAY,
-      addDaysKey(TODAY, 1),
-    ]);
-    expect(dataset.duties[1]?.status).toBe('TODAY');
-    expect(dataset.homework.filter((item) => item.isLate)).toHaveLength(1);
+const dutyInput = (date = TODAY) => ({
+  date,
+  shift: 'MORNING' as const,
+  studentName: 'Ani',
+  notes: '',
+});
+
+describe('local dataset', () => {
+  it('starts empty on a fresh install', async () => {
+    const dataset = await createOfflineStorage(memoryBackend()).load();
+    expect(dataset.duties).toEqual([]);
+    expect(dataset.homework).toEqual([]);
+    expect(dataset.exams).toEqual([]);
+    expect(dataset.subjects).toEqual([]);
+    expect(dataset.user.fullName).toBe('Siswa');
     expect(dataset.uniform.total).toBe(4);
   });
 
-  it('derives dashboard cards with the shared colour coding', () => {
-    const dashboard = buildOfflineDashboard(createDemoDataset(NOW), NOW);
+  it('keeps example data behind an explicit action', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    await repository.loadDemo();
+
+    expect((await repository.duties()).items).toHaveLength(3);
+    expect((await repository.subjects()).items).toHaveLength(3);
+    expect((await repository.homework()).items.some((item) => item.isLate)).toBe(true);
+  });
+
+  it('derives statuses from dates instead of stored flags', () => {
+    const derived = deriveDataset(
+      {
+        ...createEmptyDataset(NOW),
+        duties: [
+          {
+            id: 'a',
+            classId: 'k',
+            date: addDaysKey(TODAY, -1),
+            shift: 'MORNING',
+            assignedStudentId: 's',
+            status: 'TODAY',
+          },
+          {
+            id: 'b',
+            classId: 'k',
+            date: TODAY,
+            shift: 'AFTERNOON',
+            assignedStudentId: 's',
+          },
+        ],
+      },
+      NOW,
+    );
+
+    expect(derived.duties[0]?.status).toBe('OVERDUE');
+    expect(derived.duties[0]?.canComplete).toBe(true);
+    expect(derived.duties[1]?.status).toBe('TODAY');
+  });
+
+  it('builds dashboard cards from local data', () => {
+    const dashboard = buildOfflineDashboard(deriveDataset(createDemoDataset(NOW), NOW), NOW);
     const byKey = new Map(dashboard.cards.map((card) => [card.key, card]));
 
     expect(dashboard.greeting).toBe('Selamat pagi');
     expect(byKey.get('duty')?.badge).toEqual({ label: 'Hari ini', color: '#F39C12' });
     expect(byKey.get('homework')?.badge).toEqual({ label: 'Terlambat', color: '#C0392B' });
-    expect(byKey.get('exam')?.summary).toContain('Matematika');
-    expect(dashboard.detail?.homework?.lateCount).toBe(1);
-    expect(dashboard.detail?.subjects).toHaveLength(3);
+    expect(byKey.get('subjects')?.summary).toBe('3 mata pelajaran');
   });
 });
 
@@ -56,125 +105,164 @@ describe('offline storage', () => {
     expect((await second.load()).uniform.completedCount).toBe(2);
   });
 
+  it('recovers from a corrupt payload', async () => {
+    const backend = memoryBackend();
+    await backend.setItem(DATASET_KEY, '{oops');
+
+    const storage = createOfflineStorage(backend);
+    expect((await storage.load()).duties).toEqual([]);
+  });
+
   it('resets the uniform checklist when the stored day is old', async () => {
     const backend = memoryBackend();
-    const seeded = createDemoDataset(NOW);
+    const seeded = createEmptyDataset(NOW);
     await backend.setItem(
-      'asistenku.dataset.v1',
+      DATASET_KEY,
       JSON.stringify({ ...seeded, uniform: demoUniform(addDaysKey(TODAY, -3), ['shirt']) }),
     );
 
-    const storage = createOfflineStorage(backend);
-    const dataset = await storage.load();
+    const dataset = await createOfflineStorage(backend).load();
     expect(dataset.uniform.date).toBe(formatDateKey(new Date()));
     expect(dataset.uniform.completedCount).toBe(0);
-    // Rollover is written back, so the next launch reads the fresh checklist.
-    const persisted = JSON.parse((await backend.getItem('asistenku.dataset.v1'))!);
-    expect(persisted.uniform.date).toBe(formatDateKey(new Date()));
-  });
-
-  it('recovers from a corrupt payload', async () => {
-    const backend = memoryBackend();
-    await backend.setItem('asistenku.dataset.v1', '{oops');
-
-    const storage = createOfflineStorage(backend);
-    expect((await storage.load()).user.email).toBe('ani@sekolah.test');
-  });
-
-  it('resets back to the bundled seed', async () => {
-    const storage = createOfflineStorage(memoryBackend());
-    const dataset = await storage.load();
-    await storage.save({ ...dataset, duties: [] });
-    await storage.reset();
-    expect((await storage.load()).duties).toHaveLength(3);
   });
 });
 
-describe('local repository', () => {
-  it('serves every screen from the bundled dataset', async () => {
-    const repository = createRepository(createOfflineStorage(memoryBackend()));
-
-    await expect(repository.dashboard()).resolves.toMatchObject({
-      greeting: expect.stringMatching(/^Selamat (pagi|siang|sore|malam)$/),
-    });
-    await expect(repository.duties()).resolves.toMatchObject({ items: expect.any(Array) });
-    await expect(repository.homework()).resolves.toMatchObject({ items: expect.any(Array) });
-    await expect(repository.exams()).resolves.toMatchObject({ items: expect.any(Array) });
-    await expect(repository.subjects()).resolves.toMatchObject({ items: expect.any(Array) });
-    await expect(repository.uniformChecklist()).resolves.toMatchObject({ total: 4 });
-  });
-
-  it('persists duty completion across a reload', async () => {
+describe('duty CRUD', () => {
+  it('creates, completes and deletes a duty', async () => {
     const backend = memoryBackend();
-    const storage = createOfflineStorage(backend);
-    const repository = createRepository(storage);
-    const dataset = await storage.load();
-    const todayDuty = dataset.duties.find((duty) => duty.status === 'TODAY')!;
+    const repository = createRepository(createOfflineStorage(backend));
 
-    const result = await repository.completeDuty(todayDuty.id);
-    expect(result.duty.status).toBe('COMPLETED');
-    expect(result.toast.type).toBe('success');
+    const duty = await repository.saveDuty(dutyInput());
+    expect(duty.status).toBe('TODAY');
+    expect(duty.canComplete).toBe(true);
 
-    const reloaded = await createOfflineStorage(backend).load();
-    expect(reloaded.duties.find((duty) => duty.id === todayDuty.id)?.status).toBe('COMPLETED');
+    const completed = await repository.completeDuty(duty.id);
+    expect(completed.status).toBe('COMPLETED');
+    expect(completed.canComplete).toBe(false);
+
+    // Survives a reload from disk.
+    const reloaded = createRepository(createOfflineStorage(backend));
+    expect((await reloaded.duties()).items[0]?.status).toBe('COMPLETED');
+
+    await reloaded.removeDuty(duty.id);
+    expect((await reloaded.duties()).items).toEqual([]);
   });
 
-  it('reports an unknown duty without crashing', async () => {
+  it('rejects missing fields and bad dates', async () => {
     const repository = createRepository(createOfflineStorage(memoryBackend()));
-    const result = await repository.completeDuty('missing');
-    expect(result.toast.type).toBe('info');
+    await expect(repository.saveDuty({ ...dutyInput(), studentName: '  ' })).rejects.toThrow(
+      'Nama siswa wajib diisi.',
+    );
+    await expect(repository.saveDuty({ ...dutyInput(), date: '01-11-2026' })).rejects.toThrow(
+      'Tanggal harus berformat YYYY-MM-DD.',
+    );
+  });
+});
+
+describe('homework CRUD', () => {
+  const input = (dueDate = TODAY) => ({
+    title: 'Latihan',
+    subjectName: 'Matematika',
+    dueDate,
+    description: '',
   });
 
-  it('persists uniform toggles and rebuilds the checklist', async () => {
-    const storage = createOfflineStorage(memoryBackend());
-    const repository = createRepository(storage);
-
-    const first = await repository.toggleUniform(TODAY, 'shirt', true);
-    expect(first.completedCount).toBe(1);
-    expect(first.status).toBe('PARTIAL');
-
-    const second = await repository.toggleUniform(TODAY, 'tie', true);
-    expect(second.completedCount).toBe(2);
-    expect(second.items.find((item) => item.key === 'shirt')?.checked).toBe(true);
-  });
-
-  it('submits homework and keeps it in the list', async () => {
-    const backend = memoryBackend();
-    const storage = createOfflineStorage(backend);
-    const repository = createRepository(storage);
-    const { items } = await repository.homework();
-    const late = items.find((item) => item.isLate)!;
+  it('submits work and keeps late work undeletable', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    const late = await repository.saveHomework(input(addDaysKey(TODAY, -2)));
+    expect(late.isLate).toBe(true);
+    expect(late.subject?.code).toBe('MAT');
 
     const submitted = await repository.completeHomework(late.id);
     expect(submitted.assignment?.status).toBe('SUBMITTED');
+    expect(submitted.isOverdue).toBe(false);
 
-    const reloaded = await createOfflineStorage(backend).load();
-    expect(reloaded.homework.find((item) => item.id === late.id)?.assignment?.status).toBe('SUBMITTED');
+    await expect(repository.removeHomework(late.id)).rejects.toThrow('PR terlambat tidak bisa dihapus.');
   });
 
-  it('rejects an unknown homework id', async () => {
+  it('deletes work that is still on time', async () => {
     const repository = createRepository(createOfflineStorage(memoryBackend()));
-    await expect(repository.completeHomework('missing')).rejects.toThrow('PR tidak ditemukan.');
+    const homework = await repository.saveHomework(input(addDaysKey(TODAY, 3)));
+    await repository.removeHomework(homework.id);
+    expect((await repository.homework()).items).toEqual([]);
   });
 
-  it('re-seeds everything on reset', async () => {
-    const storage = createOfflineStorage(memoryBackend());
-    const repository = createRepository(storage);
-    const dataset = await storage.load();
-    await repository.completeDuty(dataset.duties[1]!.id);
-    await repository.toggleUniform(TODAY, 'shirt', true);
-
-    await repository.reset();
-
-    const duties = (await repository.duties()).items;
-    expect(duties.find((duty) => duty.status === 'TODAY')).toBeTruthy();
-    expect((await repository.uniformChecklist()).completedCount).toBe(0);
-  });
-
-  it('returns an empty checklist for another day', async () => {
+  it('rejects an empty title', async () => {
     const repository = createRepository(createOfflineStorage(memoryBackend()));
-    const other = await repository.uniformChecklist(addDaysKey(TODAY, 1));
-    expect(other.date).toBe(addDaysKey(TODAY, 1));
-    expect(other.completedCount).toBe(0);
+    await expect(repository.saveHomework(input())).resolves.toBeTruthy();
+    await expect(repository.saveHomework({ ...input(), title: '' })).rejects.toThrow(
+      'Judul PR wajib diisi.',
+    );
+  });
+});
+
+describe('exam CRUD', () => {
+  const input = {
+    title: 'Ulangan',
+    subjectName: 'IPA',
+    examDate: TODAY,
+    startTime: '07:30',
+    endTime: '09:00',
+    room: 'R12',
+  };
+
+  it('locks a published exam against edits and deletes', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    const exam = await repository.saveExam(input);
+    expect(exam.isLocked).toBe(false);
+
+    const published = await repository.publishExam(exam.id);
+    expect(published.isLocked).toBe(true);
+
+    await expect(repository.saveExam(input, exam.id)).rejects.toThrow(
+      'Ujian terpublikasi tidak bisa diubah.',
+    );
+    await expect(repository.removeExam(exam.id)).rejects.toThrow(
+      'Ujian terpublikasi tidak bisa dihapus.',
+    );
+  });
+
+  it('still removes drafts and validates times', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    const exam = await repository.saveExam(input);
+    await repository.removeExam(exam.id);
+    expect((await repository.exams()).items).toEqual([]);
+
+    await expect(repository.saveExam({ ...input, startTime: '7:30' })).rejects.toThrow(
+      'Jam harus berformat HH:MM.',
+    );
+  });
+});
+
+describe('subjects and profile', () => {
+  it('creates, edits and removes a subject', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    const created = await repository.saveSubject(
+      { name: 'Matematika', code: 'mtk', teacherName: 'Bu Sari', teacherEmail: 'sari@sekolah.id' },
+    );
+    expect(created.code).toBe('MTK');
+    expect(created.teacher?.fullName).toBe('Bu Sari');
+
+    const updated = await repository.saveSubject(
+      { name: 'Matematika Lanjut', code: 'MTK', teacherName: '', teacherEmail: '' },
+      created.id,
+    );
+    expect(updated.name).toBe('Matematika Lanjut');
+    expect(updated.teacher).toBeNull();
+
+    await repository.removeSubject(created.id);
+    expect((await repository.subjects()).items).toEqual([]);
+  });
+
+  it('renames the student and clears everything', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    await repository.saveSubject({ name: 'IPA', code: 'IPA', teacherName: '', teacherEmail: '' });
+    await repository.updateProfile('  Budi  ');
+
+    expect((await repository.dashboard()).user.fullName).toBe('Budi');
+
+    await repository.clearAll();
+    expect((await repository.dashboard()).user.fullName).toBe('Siswa');
+    expect((await repository.subjects()).items).toEqual([]);
   });
 });

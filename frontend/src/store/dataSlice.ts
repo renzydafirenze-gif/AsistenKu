@@ -1,7 +1,13 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 
-import type { Repository } from '../offline/repository';
 import type { Dashboard, Duty, Exam, Homework, Subject, UniformChecklist } from '../api/types';
+import type {
+  DutyInput,
+  ExamInput,
+  HomeworkInput,
+  Repository,
+  SubjectInput,
+} from '../offline/repository';
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -28,160 +34,147 @@ interface DataDeps {
 }
 
 function describe(error: unknown): string {
-  return error instanceof Error ? error.message : 'Gagal memuat data.';
+  return error instanceof Error ? error.message : 'Gagal menyimpan data.';
 }
 
-export const loadDashboard = createAsyncThunk<Dashboard, void, { extra: DataDeps }>(
-  'data/dashboard',
-  async (_arg, { extra }) => extra.repository.dashboard(),
-);
+interface Snapshot {
+  dashboard: Dashboard;
+  duties: Duty[];
+  homework: Homework[];
+  exams: Exam[];
+  subjects: Subject[];
+  uniform: UniformChecklist;
+}
 
-export const loadDuties = createAsyncThunk<Duty[], void, { extra: DataDeps }>(
-  'data/duties',
-  async (_arg, { extra }) => (await extra.repository.duties()).items,
-);
-
-export const completeDuty = createAsyncThunk<Duty, string, { extra: DataDeps }>(
-  'data/completeDuty',
-  async (id, { extra }) => (await extra.repository.completeDuty(id)).duty,
-);
-
-export const loadHomework = createAsyncThunk<Homework[], void, { extra: DataDeps }>(
-  'data/homework',
-  async (_arg, { extra }) => (await extra.repository.homework()).items,
-);
-
-export const completeHomework = createAsyncThunk<Homework, string, { extra: DataDeps }>(
-  'data/completeHomework',
-  async (id, { extra }) => extra.repository.completeHomework(id),
-);
-
-export const loadExams = createAsyncThunk<Exam[], void, { extra: DataDeps }>(
-  'data/exams',
-  async (_arg, { extra }) => (await extra.repository.exams()).items,
-);
-
-export const loadSubjects = createAsyncThunk<Subject[], void, { extra: DataDeps }>(
-  'data/subjects',
-  async (_arg, { extra }) => (await extra.repository.subjects()).items,
-);
-
-export const loadUniform = createAsyncThunk<UniformChecklist, string | undefined, { extra: DataDeps }>(
-  'data/uniform',
-  async (date, { extra }) => extra.repository.uniformChecklist(date),
-);
-
-export const toggleUniform = createAsyncThunk<
-  UniformChecklist,
-  { date: string; itemKey: string; checked: boolean },
-  { extra: DataDeps }
->('data/toggleUniform', async ({ date, itemKey, checked }, { extra }) =>
-  extra.repository.toggleUniform(date, itemKey, checked),
-);
-
-export const resetDataset = createAsyncThunk<void, void, { extra: DataDeps }>(
-  'data/reset',
+/**
+ * The whole dataset is small and local, so every mutation reloads it once
+ * instead of patching six slices by hand. Screens therefore never show stale
+ * cross-resource numbers (e.g. dashboard PR counts after submitting work).
+ */
+export const refreshAll = createAsyncThunk<Snapshot, void, { extra: DataDeps }>(
+  'data/refreshAll',
   async (_arg, { extra }) => {
-    await extra.repository.reset();
+    const [dashboard, duties, homework, exams, subjects, uniform] = await Promise.all([
+      extra.repository.dashboard(),
+      extra.repository.duties(),
+      extra.repository.homework(),
+      extra.repository.exams(),
+      extra.repository.subjects(),
+      extra.repository.uniformChecklist(),
+    ]);
+    return {
+      dashboard,
+      duties: duties.items,
+      homework: homework.items,
+      exams: exams.items,
+      subjects: subjects.items,
+      uniform,
+    };
   },
 );
+
+type MutationApi = {
+  extra: DataDeps;
+  dispatch: (action: unknown) => unknown;
+};
+
+/** Runs a local mutation, then reloads every resource exactly once. */
+function mutation<Result, Arg = void>(
+  name: string,
+  run: (repository: Repository, arg: Arg) => Promise<Result>,
+) {
+  return createAsyncThunk<Result, Arg, MutationApi>(name, async (arg, { extra, dispatch }) => {
+    const result = await run(extra.repository, arg);
+    await dispatch(refreshAll());
+    return result;
+  });
+}
+
+export const saveDuty = mutation('data/saveDuty', (repository, arg: { input: DutyInput; id?: string }) =>
+  repository.saveDuty(arg.input, arg.id),
+);
+export const completeDuty = mutation('data/completeDuty', (repository, id: string) =>
+  repository.completeDuty(id),
+);
+export const removeDuty = mutation('data/removeDuty', (repository, id: string) =>
+  repository.removeDuty(id),
+);
+
+export const saveHomework = mutation(
+  'data/saveHomework',
+  (repository, arg: { input: HomeworkInput; id?: string }) =>
+    repository.saveHomework(arg.input, arg.id),
+);
+export const completeHomework = mutation('data/completeHomework', (repository, id: string) =>
+  repository.completeHomework(id),
+);
+export const removeHomework = mutation('data/removeHomework', (repository, id: string) =>
+  repository.removeHomework(id),
+);
+
+export const saveExam = mutation('data/saveExam', (repository, arg: { input: ExamInput; id?: string }) =>
+  repository.saveExam(arg.input, arg.id),
+);
+export const publishExam = mutation('data/publishExam', (repository, id: string) =>
+  repository.publishExam(id),
+);
+export const removeExam = mutation('data/removeExam', (repository, id: string) =>
+  repository.removeExam(id),
+);
+
+export const saveSubject = mutation(
+  'data/saveSubject',
+  (repository, arg: { input: SubjectInput; id?: string }) =>
+    repository.saveSubject(arg.input, arg.id),
+);
+export const removeSubject = mutation('data/removeSubject', (repository, id: string) =>
+  repository.removeSubject(id),
+);
+
+export const toggleUniform = mutation(
+  'data/toggleUniform',
+  (repository, arg: { date: string; itemKey: string; checked: boolean }) =>
+    repository.toggleUniform(arg.date, arg.itemKey, arg.checked),
+);
+
+export const updateProfile = mutation('data/updateProfile', (repository, name: string) =>
+  repository.updateProfile(name),
+);
+export const clearAll = mutation('data/clearAll', (repository) => repository.clearAll());
+export const loadDemo = mutation('data/loadDemo', (repository) => repository.loadDemo());
 
 const dataSlice = createSlice({
   name: 'data',
   initialState,
-  reducers: {
-    resetData: () => initialState,
-  },
+  reducers: {},
   extraReducers(builder) {
     builder
-      .addCase(loadDashboard.pending, (state) => {
-        state.dashboard.status = 'loading';
-        state.dashboard.error = null;
+      .addCase(refreshAll.pending, (state) => {
+        (
+          ['dashboard', 'duties', 'homework', 'exams', 'subjects', 'uniform'] as const
+        ).forEach((key) => {
+          state[key].status = state[key].data ? 'ready' : 'loading';
+        });
       })
-      .addCase(loadDashboard.fulfilled, (state, action) => {
-        state.dashboard = { data: action.payload, status: 'ready', error: null };
+      .addCase(refreshAll.fulfilled, (state, action) => {
+        const { dashboard, duties, homework, exams, subjects, uniform } = action.payload;
+        state.dashboard = { data: dashboard, status: 'ready', error: null };
+        state.duties = { data: duties, status: 'ready', error: null };
+        state.homework = { data: homework, status: 'ready', error: null };
+        state.exams = { data: exams, status: 'ready', error: null };
+        state.subjects = { data: subjects, status: 'ready', error: null };
+        state.uniform = { data: uniform, status: 'ready', error: null };
       })
-      .addCase(loadDashboard.rejected, (state, action) => {
-        state.dashboard = {
-          data: state.dashboard.data,
-          status: 'error',
-          error: action.error.message ?? 'Gagal memuat dasbor.',
-        };
-      })
-      .addCase(loadDuties.pending, (state) => {
-        state.duties.status = 'loading';
-        state.duties.error = null;
-      })
-      .addCase(loadDuties.fulfilled, (state, action) => {
-        state.duties = { data: action.payload, status: 'ready', error: null };
-      })
-      .addCase(loadDuties.rejected, (state, action) => {
-        state.duties = { data: state.duties.data, status: 'error', error: describe(action.error) };
-      })
-      .addCase(completeDuty.fulfilled, (state, action) => {
-        // Replace in place so the list keeps its order after completion.
-        const index = state.duties.data.findIndex((duty) => duty.id === action.payload.id);
-        if (index >= 0) state.duties.data[index] = action.payload;
-      })
-      .addCase(loadHomework.fulfilled, (state, action) => {
-        state.homework = { data: action.payload, status: 'ready', error: null };
-      })
-      .addCase(loadHomework.pending, (state) => {
-        state.homework.status = 'loading';
-      })
-      .addCase(loadHomework.rejected, (state, action) => {
-        state.homework = {
-          data: state.homework.data,
-          status: 'error',
-          error: describe(action.error),
-        };
-      })
-      .addCase(completeHomework.fulfilled, (state, action) => {
-        const index = state.homework.data.findIndex((item) => item.id === action.payload.id);
-        if (index >= 0) state.homework.data[index] = action.payload;
-      })
-      .addCase(completeHomework.rejected, (state, action) => {
-        state.homework.error = describe(action.error);
-      })
-      .addCase(loadExams.fulfilled, (state, action) => {
-        state.exams = { data: action.payload, status: 'ready', error: null };
-      })
-      .addCase(loadExams.rejected, (state, action) => {
-        state.exams = { data: state.exams.data, status: 'error', error: describe(action.error) };
-      })
-      .addCase(loadSubjects.fulfilled, (state, action) => {
-        state.subjects = { data: action.payload, status: 'ready', error: null };
-      })
-      .addCase(loadSubjects.rejected, (state, action) => {
-        state.subjects = {
-          data: state.subjects.data,
-          status: 'error',
-          error: describe(action.error),
-        };
-      })
-      .addCase(loadUniform.fulfilled, (state, action) => {
-        state.uniform = { data: action.payload, status: 'ready', error: null };
-      })
-      .addCase(loadUniform.pending, (state) => {
-        state.uniform.status = 'loading';
-      })
-      .addCase(loadUniform.rejected, (state, action) => {
-        state.uniform = {
-          data: state.uniform.data,
-          status: 'error',
-          error: describe(action.error),
-        };
-      })
-      .addCase(toggleUniform.fulfilled, (state, action) => {
-        state.uniform = { data: action.payload, status: 'ready', error: null };
-      })
-      .addCase(toggleUniform.rejected, (state, action) => {
-        state.uniform.error = describe(action.error);
-      })
-      // Back to `idle` so every mounted screen reloads from the fresh seed.
-      .addCase(resetDataset.fulfilled, () => initialState);
+      .addCase(refreshAll.rejected, (state, action) => {
+        const message = action.error.message ?? describe(action.error);
+        state.dashboard = { ...state.dashboard, status: 'error', error: message };
+        state.duties = { ...state.duties, status: 'error', error: message };
+        state.homework = { ...state.homework, status: 'error', error: message };
+        state.exams = { ...state.exams, status: 'error', error: message };
+        state.subjects = { ...state.subjects, status: 'error', error: message };
+        state.uniform = { ...state.uniform, status: 'error', error: message };
+      });
   },
 });
 
-export const { resetData } = dataSlice.actions;
 export const dataReducer = dataSlice.reducer;
