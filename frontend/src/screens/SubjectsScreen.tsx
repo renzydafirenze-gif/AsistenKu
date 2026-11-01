@@ -1,16 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 
-import { Card } from '../components/Card';
-import { CardActions } from '../components/CardActions';
 import { EmptyState } from '../components/EmptyState';
+import { Fab } from '../components/Fab';
+import { ListRow } from '../components/ListRow';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { Screen } from '../components/Screen';
+import { SectionHeader } from '../components/SectionHeader';
+import { Sheet } from '../components/Sheet';
 import { TextField } from '../components/TextField';
 import type { Subject } from '../api/types';
 import { useAppDispatch, useAppSelector } from '../store';
 import { refreshAll, removeSubject, saveSubject } from '../store/dataSlice';
-import { useTheme } from '../theme/ThemeProvider';
 
 const errorMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
@@ -20,17 +22,16 @@ const errorMessage = (error: unknown) => {
   return 'Perubahan tidak tersimpan.';
 };
 
+const emptyForm = () => ({ name: '', code: '', teacherName: '', teacherEmail: '' });
+
 export function SubjectsScreen() {
-  const theme = useTheme();
   const dispatch = useAppDispatch();
+  const navigation = useNavigation<{ goBack?: () => void }>();
   const { data, status, error } = useAppSelector((state) => state.data.subjects);
 
-  const [formOpen, setFormOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [code, setCode] = useState('');
-  const [teacherName, setTeacherName] = useState('');
-  const [teacherEmail, setTeacherEmail] = useState('');
+  const [form, setForm] = useState(emptyForm());
 
   const refresh = useCallback(() => {
     void dispatch(refreshAll());
@@ -42,44 +43,41 @@ export function SubjectsScreen() {
 
   const openCreate = () => {
     setEditingId(null);
-    setName('');
-    setCode('');
-    setTeacherName('');
-    setTeacherEmail('');
-    setFormOpen(true);
+    setForm(emptyForm());
+    setSheetOpen(true);
   };
 
   const openEdit = (subject: Subject) => {
     setEditingId(subject.id);
-    setName(subject.name);
-    setCode(subject.code);
-    setTeacherName(subject.teacher?.fullName ?? '');
-    setTeacherEmail(subject.teacher?.email ?? '');
-    setFormOpen(true);
+    setForm({
+      name: subject.name,
+      code: subject.code,
+      teacherName: subject.teacher?.fullName ?? '',
+      teacherEmail: subject.teacher?.email ?? '',
+    });
+    setSheetOpen(true);
   };
 
   const submit = async () => {
     try {
-      await dispatch(
-        saveSubject({
-          input: { name, code, teacherName, teacherEmail },
-          id: editingId ?? undefined,
-        }),
-      ).unwrap();
-      setFormOpen(false);
+      await dispatch(saveSubject({ input: form, id: editingId ?? undefined })).unwrap();
+      setSheetOpen(false);
     } catch (failure) {
       Alert.alert('Gagal menyimpan', errorMessage(failure));
     }
   };
 
-  const confirmDelete = (subject: Subject) => {
-    Alert.alert('Hapus mata pelajaran?', subject.name, [
+  const remove = () => {
+    if (!editingId) return;
+    const id = editingId;
+    Alert.alert('Hapus mata pelajaran?', form.name, [
       { text: 'Batal', style: 'cancel' },
       {
         text: 'Hapus',
         style: 'destructive',
         onPress: () => {
-          dispatch(removeSubject(subject.id))
+          setSheetOpen(false);
+          dispatch(removeSubject(id))
             .unwrap()
             .catch((failure) => Alert.alert('Gagal menghapus', errorMessage(failure)));
         },
@@ -87,89 +85,96 @@ export function SubjectsScreen() {
     ]);
   };
 
+  // Grouped by first letter keeps a long subject list scannable.
+  const groups = data.reduce<Array<{ title: string; items: Subject[] }>>((all, subject) => {
+    const title = subject.name.slice(0, 1).toUpperCase();
+    const bucket = all.find((group) => group.title === title);
+    if (bucket) bucket.items.push(subject);
+    else all.push({ title, items: [subject] });
+    return all;
+  }, []);
+
   return (
     <Screen
       title="Mata pelajaran"
       subtitle={`${data.length} mapel · guru pengampu`}
+      onBack={navigation.goBack ? () => navigation.goBack!() : undefined}
       refreshing={status === 'loading'}
       onRefresh={refresh}
+      floating={<Fab label="Tambah mapel" onPress={openCreate} accessibilityHint="Menambah mata pelajaran" />}
     >
-      {error ? (
-        <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
-          {error}
-        </Text>
+      {error ? <EmptyState title="Gagal memuat data" hint={error} icon="alert-circle-outline" /> : null}
+
+      {status !== 'loading' && data.length === 0 ? (
+        <EmptyState
+          icon="list-outline"
+          title="Belum ada mata pelajaran"
+          hint="Tambahkan mapel dan guru pengampunya."
+        />
       ) : null}
 
-      {formOpen ? (
-        <View style={[styles.form, { borderColor: theme.colors.border }]}>
-          <Text style={[styles.formTitle, { color: theme.colors.text }]}>
-            {editingId ? 'Ubah mapel' : 'Mapel baru'}
-          </Text>
-          <TextField
-            label="Nama mapel"
-            value={name}
-            onChangeText={setName}
-            placeholder="Contoh: Matematika"
-            testID="subject-name"
-          />
-          <TextField
-            label="Kode"
-            value={code}
-            onChangeText={setCode}
-            placeholder="MTK"
-            autoCapitalize="characters"
-            maxLength={6}
-            testID="subject-code"
-          />
-          <TextField
-            label="Guru (opsional)"
-            value={teacherName}
-            onChangeText={setTeacherName}
-            placeholder="Nama guru"
-            testID="subject-teacher"
-          />
-          <TextField
-            label="Email guru (opsional)"
-            value={teacherEmail}
-            onChangeText={setTeacherEmail}
-            placeholder="guru@sekolah.id"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            testID="subject-email"
-          />
-          <PrimaryButton label="Simpan mapel" onPress={() => void submit()} />
-          <PrimaryButton label="Batal" tone="ghost" onPress={() => setFormOpen(false)} />
-        </View>
-      ) : (
-        <PrimaryButton label="Tambah mapel" onPress={openCreate} />
-      )}
-
-      {status !== 'loading' && data.length === 0 && !formOpen ? (
-        <EmptyState title="Belum ada mata pelajaran" hint="Tekan “Tambah mapel” untuk memulai." />
-      ) : null}
-
-      {data.map((subject) => (
-        <Card
-          key={subject.id}
-          testID={`subject-${subject.id}`}
-          title={subject.name}
-          subtitle={subject.teacher?.fullName || 'Guru belum ditetapkan'}
-          badge={{ label: subject.code, color: theme.colors.primary }}
-        >
-          {subject.teacher?.email ? (
-            <Text style={[styles.meta, { color: theme.colors.textMuted }]}>
-              {subject.teacher.email}
-            </Text>
-          ) : null}
-          <CardActions onEdit={() => openEdit(subject)} onDelete={() => confirmDelete(subject)} />
-        </Card>
+      {groups.map((group) => (
+        <React.Fragment key={group.title}>
+          <SectionHeader title={group.title} />
+          {group.items.map((subject) => (
+            <ListRow
+              key={subject.id}
+              testID={`subject-${subject.id}`}
+              title={subject.name}
+              meta={subject.teacher?.fullName || 'Guru belum ditetapkan'}
+              detail={subject.teacher?.email || undefined}
+              trailing={subject.code}
+              onPress={() => openEdit(subject)}
+              accessibilityHint="Membuka detail mata pelajaran"
+            />
+          ))}
+        </React.Fragment>
       ))}
+
+      <Sheet
+        visible={sheetOpen}
+        title={editingId ? 'Ubah mapel' : 'Mapel baru'}
+        onClose={() => setSheetOpen(false)}
+        footer={
+          <>
+            <PrimaryButton label="Simpan mapel" onPress={() => void submit()} />
+            {editingId ? <PrimaryButton label="Hapus" tone="ghost" onPress={remove} /> : null}
+          </>
+        }
+      >
+        <TextField
+          label="Nama mapel"
+          value={form.name}
+          onChangeText={(name) => setForm((previous) => ({ ...previous, name }))}
+          placeholder="Contoh: Matematika"
+          testID="subject-name"
+        />
+        <TextField
+          label="Kode"
+          value={form.code}
+          onChangeText={(code) => setForm((previous) => ({ ...previous, code }))}
+          placeholder="MTK"
+          autoCapitalize="characters"
+          maxLength={6}
+          testID="subject-code"
+        />
+        <TextField
+          label="Guru (opsional)"
+          value={form.teacherName}
+          onChangeText={(teacherName) => setForm((previous) => ({ ...previous, teacherName }))}
+          placeholder="Nama guru"
+          testID="subject-teacher"
+        />
+        <TextField
+          label="Email guru (opsional)"
+          value={form.teacherEmail}
+          onChangeText={(teacherEmail) => setForm((previous) => ({ ...previous, teacherEmail }))}
+          placeholder="guru@sekolah.id"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          testID="subject-email"
+        />
+      </Sheet>
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  meta: { fontSize: 13 },
-  form: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, gap: 10 },
-  formTitle: { fontSize: 16, fontWeight: '700' },
-});

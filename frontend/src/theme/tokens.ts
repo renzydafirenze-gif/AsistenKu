@@ -1,11 +1,12 @@
 /**
- * Design tokens. Brand colours are fixed by the brief; every text/background
- * pair is contrast-checked in `tests/contrast.test.ts` against WCAG 2.1 AA
- * (>= 4.5:1 for body text, >= 3:1 for large text and UI borders).
+ * Design tokens. Every text/background pair is contrast-checked in
+ * `tests/contrast.test.ts` against WCAG 2.1 AA (>= 4.5:1 body text).
  *
- * `brand.primary` (#2E86C1) only reaches 3.97:1 on white, so it is used for
- * large headings, icons and decoration. Filled buttons with white labels use
- * `primaryStrong` (6.82:1) instead of failing AA.
+ * House style, kept deliberately small:
+ * - one accent (blue) for actions and selection, semantic colours only for
+ *   status; status is also written out in words, never colour alone;
+ * - neutral surfaces carry structure, borders are hairlines, no shadows;
+ * - a six-step type scale, nothing in between.
  */
 export const brand = {
   primary: '#2E86C1',
@@ -20,12 +21,17 @@ export interface Theme {
   mode: 'light' | 'dark';
   colors: {
     background: string;
+    /** Rows, sheets, inputs — a step away from the background. */
     surface: string;
     surfaceRaised: string;
+    /** Selected/soft accent fill for chips and progress tracks. */
+    tint: string;
     border: string;
     /** Body text on `background`/`surface`. */
     text: string;
     textMuted: string;
+    /** Icons and decorative glyphs only, never body copy. */
+    textFaint: string;
     primary: string;
     onPrimary: string;
     primaryText: string;
@@ -38,14 +44,16 @@ export interface Theme {
     focusRing: string;
   };
   spacing: (step: number) => number;
-  radius: { sm: number; md: number; lg: number };
+  radius: { sm: number; md: number; lg: number; pill: number };
   /** Minimum touch target (WCAG 2.5.5 / Material 48dp). */
   touchTarget: number;
   typography: {
-    title: { fontSize: number; fontWeight: '700' };
-    heading: { fontSize: number; fontWeight: '600' };
-    body: { fontSize: number; fontWeight: '400' };
-    caption: { fontSize: number; fontWeight: '400' };
+    display: { fontSize: number; lineHeight: number; fontWeight: '700' };
+    title: { fontSize: number; lineHeight: number; fontWeight: '700' };
+    heading: { fontSize: number; lineHeight: number; fontWeight: '600' };
+    body: { fontSize: number; lineHeight: number; fontWeight: '400' };
+    label: { fontSize: number; lineHeight: number; fontWeight: '600' };
+    caption: { fontSize: number; lineHeight: number; fontWeight: '400' };
   };
 }
 
@@ -54,13 +62,15 @@ const spacing = (step: number) => step * spacingUnit;
 
 const shared = {
   spacing,
-  radius: { sm: 8, md: 12, lg: 20 },
+  radius: { sm: 8, md: 14, lg: 22, pill: 999 },
   touchTarget: 48,
   typography: {
-    title: { fontSize: 28, fontWeight: '700' as const },
-    heading: { fontSize: 18, fontWeight: '600' as const },
-    body: { fontSize: 16, fontWeight: '400' as const },
-    caption: { fontSize: 13, fontWeight: '400' as const },
+    display: { fontSize: 30, lineHeight: 36, fontWeight: '700' as const },
+    title: { fontSize: 22, lineHeight: 28, fontWeight: '700' as const },
+    heading: { fontSize: 17, lineHeight: 24, fontWeight: '600' as const },
+    body: { fontSize: 16, lineHeight: 24, fontWeight: '400' as const },
+    label: { fontSize: 13, lineHeight: 18, fontWeight: '600' as const },
+    caption: { fontSize: 12, lineHeight: 16, fontWeight: '400' as const },
   },
 };
 
@@ -68,15 +78,16 @@ export const lightTheme: Theme = {
   mode: 'light',
   colors: {
     background: '#FFFFFF',
-    surface: '#F4F7FA',
+    surface: '#F5F7F9',
     surfaceRaised: '#FFFFFF',
-    border: '#AEC3D4',
-    text: '#1B1F24',
-    textMuted: '#5B6670',
+    tint: 'rgba(46, 134, 193, 0.12)',
+    border: '#BFCAD5',
+    text: '#141A21',
+    textMuted: '#5A6672',
+    textFaint: '#7C8894',
     primary: brand.primaryStrong,
     onPrimary: '#FFFFFF',
-    // `brand.primary` on white is 3.97:1, enough for icons and large headings
-    // only; interactive text uses the darker shade.
+    // `brand.primary` on white is 3.97:1 — icons and large headings only.
     primaryText: brand.primaryStrong,
     secondary: brand.secondary,
     onSecondary: '#1B1F24',
@@ -93,14 +104,16 @@ export const darkTheme: Theme = {
   mode: 'dark',
   colors: {
     background: '#0F1720',
-    surface: '#16212B',
-    surfaceRaised: '#1D2A36',
-    border: '#3A4B5A',
+    surface: '#17212B',
+    surfaceRaised: '#1E2A36',
+    tint: 'rgba(140, 194, 230, 0.16)',
+    border: '#3A4753',
     text: '#F1F5F9',
-    textMuted: '#A8B6C2',
-    primary: '#7FB8DE',
+    textMuted: '#A9B7C3',
+    textFaint: '#8A97A3',
+    primary: '#8CC2E6',
     onPrimary: '#0F1720',
-    primaryText: '#7FB8DE',
+    primaryText: '#8CC2E6',
     secondary: '#F5B041',
     onSecondary: '#0B1F2A',
     accent: '#2ECC71',
@@ -113,9 +126,8 @@ export const darkTheme: Theme = {
 };
 
 /**
- * Colour-coding required by the brief: green on time, yellow upcoming, red
- * overdue. Keyed by the server's `accentColor`/status values so API and UI
- * cannot drift.
+ * Status colours required by the brief: green on time, yellow upcoming, red
+ * overdue. Keyed by the status values used across the app.
  */
 export function statusTone(theme: Theme, status: string | undefined) {
   const palette = {
@@ -145,3 +157,17 @@ export function statusTone(theme: Theme, status: string | undefined) {
       return palette.INFO;
   }
 }
+
+/** Screen-reader-friendly Indonesian words for every status used in the UI. */
+export const STATUS_LABEL: Record<string, string> = {
+  COMPLETED: 'Selesai',
+  SUBMITTED: 'Selesai',
+  COMPLETE: 'Lengkap',
+  TODAY: 'Hari ini',
+  UPCOMING: 'Terjadwal',
+  PENDING: 'Belum',
+  PARTIAL: 'Sebagian',
+  OVERDUE: 'Terlewat',
+  LATE: 'Terlambat',
+  HOLIDAY: 'Libur',
+};

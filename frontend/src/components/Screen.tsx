@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '../theme/ThemeProvider';
@@ -7,8 +7,14 @@ import { useTheme } from '../theme/ThemeProvider';
 interface ScreenProps {
   title: string;
   subtitle?: string;
-  /** Rendered opposite the title, e.g. a sign-out action. */
+  /** Small label above the title, e.g. the app name or a section. */
+  eyebrow?: string;
+  /** Rendered opposite the title, e.g. a settings action. */
   headerAccessory?: React.ReactNode;
+  /** Shows a back affordance (stack screens only). */
+  onBack?: () => void;
+  /** Fixed bottom-right action, e.g. a FAB. */
+  floating?: React.ReactNode;
   children: React.ReactNode;
   scroll?: boolean;
   refreshing?: boolean;
@@ -19,7 +25,10 @@ interface ScreenProps {
 export function Screen({
   title,
   subtitle,
+  eyebrow,
   headerAccessory,
+  onBack,
+  floating,
   children,
   scroll = true,
   refreshing = false,
@@ -30,17 +39,30 @@ export function Screen({
 
   const header = (
     <View style={styles.header}>
+      {onBack ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Kembali"
+          onPress={onBack}
+          style={styles.back}
+        >
+          <Text style={[theme.typography.label, { color: theme.colors.primaryText }]}>‹ Kembali</Text>
+        </Pressable>
+      ) : null}
+      {eyebrow ? (
+        <Text style={[styles.eyebrow, { color: theme.colors.textMuted }]}>{eyebrow.toUpperCase()}</Text>
+      ) : null}
       <View style={styles.headerRow}>
         <View style={styles.headerText}>
           <Text
             accessibilityRole="header"
             accessibilityLabel={title}
-            style={[styles.title, { color: theme.colors.text }]}
+            style={[theme.typography.display, { color: theme.colors.text }]}
           >
             {title}
           </Text>
           {subtitle ? (
-            <Text style={[styles.subtitle, { color: theme.colors.textMuted }]}>{subtitle}</Text>
+            <Text style={[theme.typography.body, { color: theme.colors.textMuted }]}>{subtitle}</Text>
           ) : null}
         </View>
         {headerAccessory}
@@ -64,7 +86,7 @@ export function Screen({
         <ScrollView
           contentContainerStyle={[
             styles.content,
-            { paddingBottom: insets.bottom + theme.spacing(6) },
+            { paddingBottom: insets.bottom + theme.spacing(16) },
           ]}
           keyboardShouldPersistTaps="handled"
           refreshControl={
@@ -84,6 +106,7 @@ export function Screen({
       ) : (
         <View style={[styles.content, styles.flex]}>{body}</View>
       )}
+      {floating}
     </View>
   );
 }
@@ -91,10 +114,10 @@ export function Screen({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
-  content: { paddingHorizontal: 16, gap: 12 },
-  header: { paddingTop: 8, paddingBottom: 4 },
-  headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  content: { paddingHorizontal: 20, gap: 8 },
+  header: { paddingTop: 12, paddingBottom: 8, gap: 2 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
   headerText: { flex: 1 },
-  title: { fontSize: 26, fontWeight: '700' },
-  subtitle: { fontSize: 14, marginTop: 2 },
+  eyebrow: { fontSize: 12, fontWeight: '700', letterSpacing: 0.8 },
+  back: { paddingVertical: 6, alignSelf: 'flex-start' },
 });

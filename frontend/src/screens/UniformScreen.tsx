@@ -1,17 +1,17 @@
 import React, { useCallback, useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { ChecklistRow } from '../components/ChecklistRow';
+import type { UniformItem } from '../api/types';
 import { EmptyState } from '../components/EmptyState';
+import { ProgressBar } from '../components/ProgressBar';
 import { Screen } from '../components/Screen';
-import { StatusBadge } from '../components/StatusBadge';
+import { SectionHeader } from '../components/SectionHeader';
 import { useAppDispatch, useAppSelector } from '../store';
 import { refreshAll, toggleUniform } from '../store/dataSlice';
-import { useTheme } from '../theme/ThemeProvider';
 import { formatDateKey, formatIndonesianDay } from '../utils/format';
 
 export function UniformScreen() {
-  const theme = useTheme();
   const dispatch = useAppDispatch();
   const { data, status, error } = useAppSelector((state) => state.data.uniform);
   const today = formatDateKey(new Date());
@@ -25,67 +25,79 @@ export function UniformScreen() {
   }, [refresh]);
 
   const isHoliday = data?.status === 'HOLIDAY';
-  const progress = data ? `${data.completedCount}/${data.total}` : '–';
+
+  // One section per uniform category (Atasan, Bawahan, Atribut, Alas kaki).
+  const groups = (data?.items ?? []).reduce<Array<{ title: string; items: UniformItem[] }>>(
+    (all, item) => {
+      const title = item.category ?? 'Lainnya';
+      const bucket = all.find((group) => group.title === title);
+      if (bucket) bucket.items.push(item);
+      else all.push({ title, items: [item] });
+      return all;
+    },
+    [],
+  );
 
   return (
     <Screen
-      title="Seragam hari ini"
+      eyebrow="AsistenKu"
+      title="Seragam"
       subtitle={formatIndonesianDay(today)}
       refreshing={status === 'loading'}
       onRefresh={refresh}
+      headerAccessory={
+        data ? (
+          <View style={styles.progress}>
+            <ProgressBar
+              value={data.completedCount}
+              total={data.total}
+              label={`${data.completedCount}/${data.total} selesai`}
+            />
+          </View>
+        ) : null
+      }
     >
-      {error ? (
-        <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
-          {error}
-        </Text>
-      ) : null}
-
-      {status === 'loading' && !data ? <EmptyState title="Memuat checklist…" /> : null}
-
-      {data ? (
-        <View style={styles.summary}>
-          <Text
-            accessibilityLabel={`${data.completedCount} dari ${data.total} item selesai`}
-            style={[styles.progress, { color: theme.colors.text }]}
-          >
-            {progress} item selesai
-          </Text>
-          {data.badge ? <StatusBadge status={data.status} label={data.badge.label} /> : null}
-        </View>
-      ) : null}
-
-      {data?.note ? (
-        <Text style={[styles.note, { color: theme.colors.textMuted }]}>{data.note}</Text>
-      ) : null}
+      {error ? <EmptyState title="Gagal memuat data" hint={error} icon="alert-circle-outline" /> : null}
 
       {isHoliday ? (
-        <EmptyState title="Hari libur" hint="Tidak ada seragam wajib hari ini. Selamat beristirahat!" />
+        <EmptyState
+          icon="sunny-outline"
+          title="Hari libur"
+          hint={data?.note ?? 'Tidak ada seragam wajib hari ini. Selamat beristirahat!'}
+        />
       ) : null}
-
-      {data && !isHoliday
-        ? data.items.map((item) => (
-            <ChecklistRow
-              key={item.key}
-              label={item.label}
-              category={item.category}
-              checked={item.checked}
-              disabled={status === 'loading'}
-              onToggle={(checked) => {
-                void dispatch(toggleUniform({ date: data.date, itemKey: item.key, checked }));
-              }}
-            />
-          ))
-        : null}
 
       {data && !isHoliday && data.items.length === 0 ? (
-        <EmptyState title="Belum ada item seragam" hint="Kalender akademik belum diisi untuk hari ini." />
+        <EmptyState
+          icon="shirt-outline"
+          title="Belum ada item seragam"
+          hint="Checklist seragam akan muncul di sini."
+        />
       ) : null}
+
+      {!isHoliday
+        ? groups.map((group) => (
+            <React.Fragment key={group.title}>
+              <SectionHeader title={group.title} />
+              {group.items.map((item) => (
+                <ChecklistRow
+                  key={item.key}
+                  label={item.label}
+                  category={item.category}
+                  checked={item.checked}
+                  disabled={status === 'loading'}
+                  onToggle={(checked) => {
+                    void dispatch(toggleUniform({ date: data!.date, itemKey: item.key, checked }));
+                  }}
+                />
+              ))}
+            </React.Fragment>
+          ))
+        : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  summary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  progress: { fontSize: 16, fontWeight: '600' },
-  note: { fontSize: 14 },
+  progress: { width: 120 },
 });

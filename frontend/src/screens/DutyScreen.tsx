@@ -1,26 +1,28 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert } from 'react-native';
 
-import { Card } from '../components/Card';
-import { CardActions } from '../components/CardActions';
 import { EmptyState } from '../components/EmptyState';
+import { Fab } from '../components/Fab';
+import { ListRow } from '../components/ListRow';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { Screen } from '../components/Screen';
+import { SectionHeader } from '../components/SectionHeader';
+import { SegmentedControl } from '../components/SegmentedControl';
+import { Sheet } from '../components/Sheet';
 import { TextField } from '../components/TextField';
 import type { Duty, DutyShift } from '../api/types';
 import { todayKey } from '../offline/repository';
 import { useAppDispatch, useAppSelector } from '../store';
 import { completeDuty, refreshAll, removeDuty, saveDuty } from '../store/dataSlice';
 import { useTheme } from '../theme/ThemeProvider';
-import { statusTone } from '../theme/tokens';
+import { STATUS_LABEL, statusTone } from '../theme/tokens';
 import { formatIndonesianDay, shiftLabel } from '../utils/format';
+import { groupByDay } from '../utils/group';
 
-const DUTY_LABEL: Record<string, string> = {
-  COMPLETED: 'Selesai',
-  TODAY: 'Hari ini',
-  UPCOMING: 'Terjadwal',
-  OVERDUE: 'Terlewat',
-};
+const SHIFTS: Array<{ value: DutyShift; label: string }> = [
+  { value: 'MORNING', label: 'Pagi' },
+  { value: 'AFTERNOON', label: 'Siang' },
+];
 
 const errorMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
@@ -30,18 +32,22 @@ const errorMessage = (error: unknown) => {
   return 'Perubahan tidak tersimpan.';
 };
 
+const emptyForm = () => ({
+  date: todayKey(),
+  shift: 'MORNING' as DutyShift,
+  studentName: '',
+  notes: '',
+});
+
 export function DutyScreen() {
   const theme = useTheme();
   const dispatch = useAppDispatch();
   const { data, status, error } = useAppSelector((state) => state.data.duties);
-  const userName = useAppSelector((state) => state.data.dashboard.data?.user.fullName ?? 'Siswa');
+  const userName = useAppSelector((state) => state.data.dashboard.data?.user.fullName ?? '');
 
-  const [formOpen, setFormOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [date, setDate] = useState(todayKey());
-  const [shift, setShift] = useState<DutyShift>('MORNING');
-  const [studentName, setStudentName] = useState(userName);
-  const [notes, setNotes] = useState('');
+  const [form, setForm] = useState(emptyForm());
 
   const refresh = useCallback(() => {
     void dispatch(refreshAll());
@@ -53,163 +59,148 @@ export function DutyScreen() {
 
   const openCreate = () => {
     setEditingId(null);
-    setDate(todayKey());
-    setShift('MORNING');
-    setStudentName(userName);
-    setNotes('');
-    setFormOpen(true);
+    setForm({ ...emptyForm(), studentName: userName });
+    setSheetOpen(true);
   };
 
   const openEdit = (duty: Duty) => {
     setEditingId(duty.id);
-    setDate(duty.date);
-    setShift(duty.shift);
-    setStudentName(duty.assignedStudentName ?? userName);
-    setNotes(duty.notes ?? '');
-    setFormOpen(true);
+    setForm({
+      date: duty.date,
+      shift: duty.shift,
+      studentName: duty.assignedStudentName ?? '',
+      notes: duty.notes ?? '',
+    });
+    setSheetOpen(true);
   };
 
   const submit = async () => {
     try {
-      await dispatch(
-        saveDuty({ input: { date, shift, studentName, notes }, id: editingId ?? undefined }),
-      ).unwrap();
-      setFormOpen(false);
+      await dispatch(saveDuty({ input: form, id: editingId ?? undefined })).unwrap();
+      setSheetOpen(false);
     } catch (failure) {
       Alert.alert('Gagal menyimpan', errorMessage(failure));
     }
   };
 
-  const confirmDelete = (duty: Duty) => {
-    Alert.alert('Hapus jadwal piket?', formatIndonesianDay(duty.date), [
+  const remove = () => {
+    if (!editingId) return;
+    const id = editingId;
+    Alert.alert('Hapus jadwal piket?', formatIndonesianDay(form.date), [
       { text: 'Batal', style: 'cancel' },
       {
         text: 'Hapus',
         style: 'destructive',
         onPress: () => {
-          dispatch(removeDuty(duty.id)).unwrap().catch((failure) => {
-            Alert.alert('Gagal menghapus', errorMessage(failure));
-          });
+          setSheetOpen(false);
+          dispatch(removeDuty(id))
+            .unwrap()
+            .catch((failure) => Alert.alert('Gagal menghapus', errorMessage(failure)));
         },
       },
     ]);
   };
 
+  const complete = () => {
+    if (!editingId) return;
+    const id = editingId;
+    dispatch(completeDuty(id))
+      .unwrap()
+      .then(() => setSheetOpen(false))
+      .catch((failure) => Alert.alert('Gagal menyimpan', errorMessage(failure)));
+  };
+
+  const editing = editingId ? data.find((duty) => duty.id === editingId) : undefined;
+  const groups = groupByDay(todayKey(), data, (duty) => duty.date);
+
   return (
     <Screen
-      title="Jadwal piket"
-      subtitle="Atur sendiri siapa yang bertugas dan kapan."
+      eyebrow="AsistenKu"
+      title="Piket"
+      subtitle={`${data.length} jadwal tersimpan`}
       refreshing={status === 'loading'}
       onRefresh={refresh}
+      floating={
+        <Fab label="Tambah piket" onPress={openCreate} accessibilityHint="Membuat jadwal piket baru" />
+      }
     >
-      {error ? (
-        <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
-          {error}
-        </Text>
+      {error ? <EmptyState title="Gagal memuat data" hint={error} icon="alert-circle-outline" /> : null}
+
+      {status !== 'loading' && data.length === 0 ? (
+        <EmptyState
+          icon="people-outline"
+          title="Belum ada jadwal piket"
+          hint="Tambahkan jadwal pertama, lalu tandai selesai saat sudah dikerjakan."
+        />
       ) : null}
 
-      {formOpen ? (
-        <View style={[styles.form, { borderColor: theme.colors.border }]}>
-          <Text style={[styles.formTitle, { color: theme.colors.text }]}>
-            {editingId ? 'Ubah piket' : 'Piket baru'}
-          </Text>
-          <TextField
-            label="Tanggal (YYYY-MM-DD)"
-            value={date}
-            onChangeText={setDate}
-            placeholder="2026-11-01"
-            autoCapitalize="none"
-            testID="duty-date"
-          />
-          <View style={styles.shiftRow}>
-            {(['MORNING', 'AFTERNOON'] as DutyShift[]).map((value) => (
-              <View key={value} style={styles.shiftCell}>
-                <PrimaryButton
-                  label={shiftLabel(value)}
-                  tone={shift === value ? 'primary' : 'ghost'}
-                  onPress={() => setShift(value)}
-                />
-              </View>
-            ))}
-          </View>
-          <TextField
-            label="Nama siswa"
-            value={studentName}
-            onChangeText={setStudentName}
-            placeholder="Nama yang bertugas"
-            testID="duty-student"
-          />
-          <TextField
-            label="Catatan (opsional)"
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="Contoh: sapu dan pel lantai"
-            testID="duty-notes"
-          />
-          <PrimaryButton label="Simpan piket" onPress={() => void submit()} />
-          <PrimaryButton label="Batal" tone="ghost" onPress={() => setFormOpen(false)} />
-        </View>
-      ) : (
-        <PrimaryButton label="Tambah piket" onPress={openCreate} />
-      )}
+      {groups.map((group) => (
+        <React.Fragment key={group.title}>
+          <SectionHeader title={group.title} aside={`${group.items.length}`} />
+          {group.items.map((duty) => {
+            const tone = statusTone(theme, duty.completedAt ? 'COMPLETED' : duty.status);
+            return (
+              <ListRow
+                key={duty.id}
+                testID={`duty-${duty.id}`}
+                title={formatIndonesianDay(duty.date)}
+                meta={`Shift ${shiftLabel(duty.shift)}${duty.assignedStudentName ? ` · ${duty.assignedStudentName}` : ''}`}
+                detail={duty.notes ?? undefined}
+                trailing={STATUS_LABEL[duty.completedAt ? 'COMPLETED' : (duty.status ?? '')] ?? 'Terjadwal'}
+                tone={tone.background}
+                onPress={() => openEdit(duty)}
+                accessibilityHint="Membuka detail piket"
+              />
+            );
+          })}
+        </React.Fragment>
+      ))}
 
-      {status !== 'loading' && data.length === 0 && !formOpen ? (
-        <EmptyState title="Belum ada jadwal piket" hint="Tekan “Tambah piket” untuk membuat jadwal pertama." />
-      ) : null}
-
-      {data.map((duty) => {
-        const tone = statusTone(theme, duty.completedAt ? 'COMPLETED' : duty.status);
-        return (
-          <Card
-            key={duty.id}
-            testID={`duty-${duty.id}`}
-            title={formatIndonesianDay(duty.date)}
-            subtitle={`Shift ${shiftLabel(duty.shift)}${duty.assignedStudentName ? ` · ${duty.assignedStudentName}` : ''}`}
-            tone={tone.background}
-            badge={{
-              label: DUTY_LABEL[duty.completedAt ? 'COMPLETED' : (duty.status ?? '')] ?? 'Terjadwal',
-              color: tone.background,
-            }}
-          >
-            {duty.notes ? (
-              <Text style={[styles.notes, { color: theme.colors.textMuted }]}>{duty.notes}</Text>
+      <Sheet
+        visible={sheetOpen}
+        title={editingId ? 'Ubah piket' : 'Piket baru'}
+        onClose={() => setSheetOpen(false)}
+        footer={
+          <>
+            <PrimaryButton label="Simpan piket" onPress={() => void submit()} />
+            {editingId ? (
+              <PrimaryButton label="Hapus" tone="ghost" onPress={remove} />
             ) : null}
-            {duty.canComplete ? (
-              <View style={styles.action}>
-                <PrimaryButton
-                  label="Tandai selesai"
-                  onPress={() => {
-                    dispatch(completeDuty(duty.id)).unwrap().catch((failure) => {
-                      Alert.alert('Gagal menyimpan', errorMessage(failure));
-                    });
-                  }}
-                  accessibilityHint="Menandai piket ini sudah dikerjakan"
-                />
-              </View>
-            ) : null}
-            <CardActions onEdit={() => openEdit(duty)} onDelete={() => confirmDelete(duty)} />
-          </Card>
-        );
-      })}
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Muat ulang jadwal piket"
-        onPress={refresh}
-        style={styles.refreshLink}
+          </>
+        }
       >
-        <Text style={{ color: theme.colors.primaryText }}>Muat ulang</Text>
-      </Pressable>
+        <TextField
+          label="Tanggal (YYYY-MM-DD)"
+          value={form.date}
+          onChangeText={(date) => setForm((previous) => ({ ...previous, date }))}
+          placeholder="2026-11-01"
+          autoCapitalize="none"
+          testID="duty-date"
+        />
+        <SegmentedControl
+          accessibilityLabel="Shift piket"
+          options={SHIFTS}
+          value={form.shift}
+          onChange={(shift) => setForm((previous) => ({ ...previous, shift }))}
+        />
+        <TextField
+          label="Nama siswa"
+          value={form.studentName}
+          onChangeText={(studentName) => setForm((previous) => ({ ...previous, studentName }))}
+          placeholder="Nama yang bertugas"
+          testID="duty-student"
+        />
+        <TextField
+          label="Catatan (opsional)"
+          value={form.notes}
+          onChangeText={(notes) => setForm((previous) => ({ ...previous, notes }))}
+          placeholder="Contoh: sapu dan pel lantai"
+          testID="duty-notes"
+        />
+        {editing?.canComplete ? (
+          <PrimaryButton label="Tandai selesai" tone="ghost" onPress={complete} />
+        ) : null}
+      </Sheet>
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  notes: { fontSize: 13, marginTop: 4 },
-  action: { marginTop: 8 },
-  form: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, gap: 10 },
-  formTitle: { fontSize: 16, fontWeight: '700' },
-  shiftRow: { flexDirection: 'row', gap: 8 },
-  shiftCell: { flex: 1 },
-  refreshLink: { alignItems: 'center', paddingVertical: 8 },
-});

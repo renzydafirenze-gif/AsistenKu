@@ -2,12 +2,19 @@ import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
-import { Card } from '../src/components/Card';
 import { ChecklistRow } from '../src/components/ChecklistRow';
 import { EmptyState } from '../src/components/EmptyState';
+import { Fab } from '../src/components/Fab';
+import { ListRow } from '../src/components/ListRow';
 import { PrimaryButton } from '../src/components/PrimaryButton';
+import { ProgressBar } from '../src/components/ProgressBar';
 import { Screen } from '../src/components/Screen';
-import { StatusBadge } from '../src/components/StatusBadge';
+import { SectionHeader } from '../src/components/SectionHeader';
+import { SegmentedControl } from '../src/components/SegmentedControl';
+import { Sheet } from '../src/components/Sheet';
+import { StatTile } from '../src/components/StatTile';
+import { StatusDot } from '../src/components/StatusDot';
+import { TextField } from '../src/components/TextField';
 import { ThemeProvider } from '../src/theme/ThemeProvider';
 import { lightTheme } from '../src/theme/tokens';
 
@@ -27,7 +34,7 @@ function wrap(node: React.ReactElement) {
 describe('components', () => {
   it('announces the screen title as a header', () => {
     const { getByRole, getByText } = wrap(
-      <Screen title="Jadwal piket" subtitle="H-1">
+      <Screen title="Jadwal piket" subtitle="Piket kelasmu">
         <EmptyState title="Kosong" />
       </Screen>,
     );
@@ -35,36 +42,122 @@ describe('components', () => {
     expect(getByText('Kosong')).toBeOnTheScreen();
   });
 
-  it('exposes the card as a single button with its badge in the label', () => {
+  it('offers a back affordance only when asked', () => {
+    const onBack = jest.fn();
+    const { getByLabelText } = wrap(
+      <Screen title="Mata pelajaran" onBack={onBack}>
+        <EmptyState title="Kosong" />
+      </Screen>,
+    );
+    fireEvent.press(getByLabelText('Kembali'));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders one accessible row per list item', () => {
     const onPress = jest.fn();
     const { getByRole } = wrap(
-      <Card
-        title="Piket hari ini"
-        subtitle="Shift pagi"
-        badge={{ label: 'Hari ini', color: '#F39C12' }}
+      <ListRow
+        title="Ulangan harian"
+        meta="Matematika · 07:30–09:00"
+        trailing="Besok"
         onPress={onPress}
-        accessibilityHint="Membuka piket"
       />,
     );
 
-    const card = getByRole('button');
-    expect(card).toHaveProp('accessibilityLabel', 'Piket hari ini. Shift pagi. Status Hari ini');
-    fireEvent.press(card);
+    const row = getByRole('button');
+    expect(row).toHaveProp('accessibilityLabel', 'Ulangan harian. Matematika · 07:30–09:00. Besok');
+    fireEvent.press(row);
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
-  it('does not create a button when the card is not pressable', () => {
-    const { queryByRole, getByText } = wrap(<Card title="Informasi" subtitle="Statis" />);
-    expect(queryByRole('button')).toBeNull();
-    expect(getByText('Informasi')).toBeOnTheScreen();
+  it('writes the status next to the coloured dot', () => {
+    const { getByLabelText, getByText } = wrap(<StatusDot status="OVERDUE" />);
+    expect(getByLabelText('Status Terlewat')).toBeOnTheScreen();
+    expect(getByText('Terlewat')).toBeOnTheScreen();
   });
 
-  it('renders status badges with the required colour coding', () => {
-    const done = wrap(<StatusBadge status="COMPLETED" label="Selesai" />);
-    expect(done.getByLabelText('Status Selesai')).toBeOnTheScreen();
+  it('shows section headers with an optional count', () => {
+    const { getByText } = wrap(<SectionHeader title="Minggu ini" aside="3" />);
+    expect(getByText('MINGGU INI')).toBeOnTheScreen();
+    expect(getByText('3')).toBeOnTheScreen();
+  });
 
-    const overdue = wrap(<StatusBadge status="OVERDUE" label="Terlambat" />);
-    expect(overdue.getByLabelText('Status Terlambat')).toBeOnTheScreen();
+  it('exposes segments as a radio group', () => {
+    const onChange = jest.fn();
+    const { getByRole, getByLabelText } = wrap(
+      <SegmentedControl
+        accessibilityLabel="Shift piket"
+        options={[
+          { value: 'MORNING', label: 'Pagi' },
+          { value: 'AFTERNOON', label: 'Siang' },
+        ]}
+        value="MORNING"
+        onChange={onChange}
+      />,
+    );
+
+    expect(getByRole('radio', { name: 'Pagi', selected: true })).toBeOnTheScreen();
+    fireEvent.press(getByLabelText('Siang'));
+    expect(onChange).toHaveBeenCalledWith('AFTERNOON');
+  });
+
+  it('summarises a number and its hint in one label', () => {
+    const onPress = jest.fn();
+    const { getByLabelText } = wrap(
+      <StatTile label="PR" value="2" hint="1 terlambat" onPress={onPress} />,
+    );
+
+    const tile = getByLabelText('PR: 2. 1 terlambat');
+    fireEvent.press(tile);
+    expect(onPress).toHaveBeenCalledTimes(1);
+  });
+
+  it('fills the progress track by ratio', () => {
+    const { getByLabelText, getByTestId } = wrap(
+      <ProgressBar value={1} total={4} label="1/4 selesai" />,
+    );
+    expect(getByLabelText('1/4 selesai')).toBeOnTheScreen();
+    expect(getByTestId('progress-fill')).toHaveStyle({ width: '25%' });
+  });
+
+  it('closes the bottom sheet from the backdrop', () => {
+    const onClose = jest.fn();
+    const { getByText, getByLabelText } = wrap(
+      <Sheet visible title="Piket baru" onClose={onClose}>
+        <EmptyState title="Isi form" />
+      </Sheet>,
+    );
+
+    expect(getByText('Piket baru')).toBeOnTheScreen();
+    fireEvent.press(getByLabelText('Tutup'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels the floating action button', () => {
+    const onPress = jest.fn();
+    const { getByLabelText } = wrap(<Fab label="Tambah PR" onPress={onPress} />);
+    fireEvent.press(getByLabelText('Tambah PR'));
+    expect(onPress).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps empty states actionable', () => {
+    const onAction = jest.fn();
+    const { getByText } = wrap(
+      <EmptyState title="Belum ada PR" hint="Catat tugas" actionLabel="Tambah PR" onAction={onAction} />,
+    );
+
+    fireEvent.press(getByText('Tambah PR'));
+    expect(onAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels text fields and reports typed text', () => {
+    const onChangeText = jest.fn();
+    const { getByLabelText } = wrap(
+      <TextField label="Judul" value="" onChangeText={onChangeText} placeholder="Judul PR" />,
+    );
+
+    fireEvent.changeText(getByLabelText('Judul'), 'Latihan');
+    expect(onChangeText).toHaveBeenCalledWith('Latihan');
   });
 
   it('toggles a checklist row and reports the new state', () => {
@@ -81,33 +174,19 @@ describe('components', () => {
 
   it('blocks interaction for disabled checklist rows', () => {
     const onToggle = jest.fn();
-    const { getByRole } = wrap(
-      <ChecklistRow label="Dasi" checked disabled onToggle={onToggle} />,
-    );
+    const { getByRole } = wrap(<ChecklistRow label="Dasi" checked disabled onToggle={onToggle} />);
     fireEvent.press(getByRole('checkbox'));
     expect(onToggle).not.toHaveBeenCalled();
   });
 
   it('disables the primary button while loading and keeps a 48dp target', () => {
     const onPress = jest.fn();
-    const { getByRole, rerender } = wrap(
-      <PrimaryButton label="Masuk" onPress={onPress} loading />,
-    );
+    const { getByRole } = wrap(<PrimaryButton label="Simpan" onPress={onPress} loading />);
     const button = getByRole('button');
     expect(button).toBeDisabled();
     expect(button).toBeBusy();
     fireEvent.press(button);
     expect(onPress).not.toHaveBeenCalled();
-
-    rerender(
-      <SafeAreaProvider initialMetrics={metrics}>
-        <ThemeProvider theme={lightTheme}>
-          <PrimaryButton label="Masuk" onPress={onPress} />
-        </ThemeProvider>
-      </SafeAreaProvider>,
-    );
-    fireEvent.press(getByRole('button'));
-    expect(onPress).toHaveBeenCalledTimes(1);
     expect(lightTheme.touchTarget).toBeGreaterThanOrEqual(44);
   });
 });

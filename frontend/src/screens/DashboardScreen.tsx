@@ -1,28 +1,25 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation, type CompositeNavigationProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
+import { ListRow } from '../components/ListRow';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { ProgressBar } from '../components/ProgressBar';
 import { Screen } from '../components/Screen';
-import { StatusBadge } from '../components/StatusBadge';
+import { SectionHeader } from '../components/SectionHeader';
+import { Sheet } from '../components/Sheet';
+import { StatTile } from '../components/StatTile';
 import { TextField } from '../components/TextField';
-import type { DashboardCard } from '../api/types';
-import type { MainTabParams } from '../navigation/RootNavigator';
+import type { MainTabParams, RootStackParams } from '../navigation/RootNavigator';
 import { useAppDispatch, useAppSelector } from '../store';
 import { clearAll, loadDemo, refreshAll, updateProfile } from '../store/dataSlice';
 import { useTheme } from '../theme/ThemeProvider';
-import { formatDateKey, formatIndonesianDay, greetingForHour, relativeDayLabel } from '../utils/format';
-
-const ROUTE_BY_CARD: Record<DashboardCard['key'], keyof MainTabParams> = {
-  duty: 'Duty',
-  uniform: 'Uniform',
-  homework: 'Homework',
-  exam: 'Exam',
-  subjects: 'Subjects',
-};
+import { statusTone } from '../theme/tokens';
+import { formatDateKey, formatIndonesianDate, greetingForHour } from '../utils/format';
 
 const errorMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
@@ -35,7 +32,13 @@ const errorMessage = (error: unknown) => {
 export function DashboardScreen() {
   const theme = useTheme();
   const dispatch = useAppDispatch();
-  const navigation = useNavigation<BottomTabNavigationProp<MainTabParams>>();
+  const navigation =
+    useNavigation<
+      CompositeNavigationProp<
+        BottomTabNavigationProp<MainTabParams>,
+        NativeStackNavigationProp<RootStackParams>
+      >
+    >();
   const { data, status, error } = useAppSelector((state) => state.data.dashboard);
   const today = formatDateKey(new Date());
 
@@ -91,13 +94,54 @@ export function DashboardScreen() {
     ]);
   };
 
-  const greeting = data?.greeting ?? greetingForHour(new Date().getHours());
-  const lateCount = data?.detail?.homework?.lateCount ?? 0;
+  const detail = data?.detail;
+  const dutyTone = statusTone(theme, detail?.duty?.completedAt ? 'COMPLETED' : detail?.duty?.status);
+  const pending = detail?.homework?.pending ?? [];
+  const dueToday = pending.filter((item) => item.dueDate.slice(0, 10) <= today);
+  const nextExam = detail?.exam;
+  const agenda = [
+    detail?.duty
+      ? {
+          key: 'duty',
+          title: 'Piket',
+          meta: detail.duty.assignedStudentName
+            ? `Bertugas · ${detail.duty.assignedStudentName}`
+            : 'Piket hari ini',
+          detail: detail.duty.notes ?? undefined,
+          onPress: () => navigation.navigate('Duty'),
+        }
+      : null,
+    ...dueToday.slice(0, 3).map((item) => ({
+      key: `hw-${item.id}`,
+      title: item.title,
+      meta: `${item.subject?.name ?? 'Tanpa mapel'} · tenggat ${formatIndonesianDate(item.dueDate.slice(0, 10))}`,
+      detail: undefined,
+      onPress: () => navigation.navigate('Homework'),
+    })),
+    nextExam && nextExam.examDate === today
+      ? {
+          key: `exam-${nextExam.id}`,
+          title: nextExam.title,
+          meta: `${nextExam.startTime}–${nextExam.endTime}${nextExam.room ? ` · ${nextExam.room}` : ''}`,
+          detail: undefined,
+          onPress: () => navigation.navigate('Exam'),
+        }
+      : null,
+  ].filter(Boolean) as Array<{
+    key: string;
+    title: string;
+    meta: string;
+    detail?: string;
+    onPress: () => void;
+  }>;
 
   return (
     <Screen
-      title={greeting}
-      subtitle={data ? `${data.user.fullName} · ${formatIndonesianDay(today)}` : formatIndonesianDay(today)}
+      eyebrow="AsistenKu"
+      title={data?.greeting ?? greetingForHour(new Date().getHours())}
+      subtitle={
+        data ? `${data.user.fullName} · ${formatIndonesianDate(today)}` : 'Menyiapkan data…'
+      }
       refreshing={status === 'loading'}
       onRefresh={refresh}
       headerAccessory={
@@ -105,129 +149,118 @@ export function DashboardScreen() {
           accessibilityRole="button"
           accessibilityLabel="Pengaturan"
           onPress={openSettings}
-          style={({ pressed }) => [
-            styles.gear,
-            {
-              borderColor: theme.colors.border,
-              borderRadius: theme.radius.md,
-              opacity: pressed ? 0.7 : 1,
-            },
-          ]}
+          style={({ pressed }) => [styles.gear, { opacity: pressed ? 0.7 : 1 }]}
         >
-          <Text style={{ color: theme.colors.text, fontSize: 20 }}>⚙</Text>
+          <Ionicons name="settings-outline" size={22} color={theme.colors.textMuted} />
         </Pressable>
       }
     >
-      {error ? (
-        <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
-          {error}
-        </Text>
-      ) : null}
+      {error ? <EmptyState title="Gagal memuat data" hint={error} icon="alert-circle-outline" /> : null}
 
-      {status === 'loading' && !data ? <EmptyState title="Memuat dasbor…" /> : null}
-
-      {data?.cards.map((card) => (
-        <Card
-          key={card.key}
-          testID={`dashboard-card-${card.key}`}
-          title={card.title}
-          subtitle={card.summary}
-          badge={card.badge}
-          onPress={() => navigation.navigate(ROUTE_BY_CARD[card.key])}
-          accessibilityHint="Membuka halaman terkait"
-        >
-          {card.key === 'homework' && lateCount > 0 ? (
-            <View style={styles.inlineBadge}>
-              <StatusBadge status="#C0392B" label={`${lateCount} terlambat`} />
-            </View>
-          ) : null}
-        </Card>
-      ))}
-
-      {data?.detail?.exam ? (
-        <Card
-          title={`Ujian berikutnya: ${data.detail.exam.title}`}
-          subtitle={`${formatIndonesianDay(data.detail.exam.examDate)} · ${data.detail.exam.startTime}–${data.detail.exam.endTime}`}
-          badge={
-            data.detail.exam.daysUntil === undefined
-              ? undefined
-              : { label: relativeDayLabel(today, data.detail.exam.examDate), color: theme.colors.secondary }
+      <View style={styles.stats}>
+        <StatTile
+          testID="stat-duty"
+          label="Piket"
+          value={!detail?.duty ? '—' : detail.duty.completedAt ? 'Selesai' : 'Hari ini'}
+          hint={detail?.duty ? detail.duty.assignedStudentName : 'belum ada'}
+          tone={dutyTone.background}
+          onPress={() => navigation.navigate('Duty')}
+        />
+        <StatTile
+          testID="stat-homework"
+          label="PR"
+          value={`${pending.length}`}
+          hint={detail?.homework?.lateCount ? `${detail.homework.lateCount} terlambat` : 'belum selesai'}
+          tone={
+            detail?.homework?.lateCount ? theme.colors.danger : theme.colors.accent
           }
+          onPress={() => navigation.navigate('Homework')}
+        />
+        <StatTile
+          testID="stat-exam"
+          label="Ujian"
+          value={nextExam ? `H-${Math.max(nextExam.daysUntil ?? 0, 0)}` : '—'}
+          hint={nextExam?.subject?.name ?? 'belum ada'}
+          tone={theme.colors.secondary}
           onPress={() => navigation.navigate('Exam')}
+        />
+      </View>
+
+      <SectionHeader title="Hari ini" aside={`${agenda.length} item`} />
+      {agenda.length === 0 ? (
+        <EmptyState
+          icon="checkmark-done-outline"
+          title="Tidak ada agenda hari ini"
+          hint="Tambahkan piket, PR atau ujian dari tab di bawah."
+        />
+      ) : (
+        agenda.map((item) => (
+          <ListRow
+            key={item.key}
+            title={item.title}
+            meta={item.meta}
+            detail={item.detail}
+            onPress={item.onPress}
+            accessibilityHint="Membuka halaman terkait"
+          />
+        ))
+      )}
+
+      <SectionHeader title="Seragam" />
+      {detail?.uniform ? (
+        <ProgressBar
+          value={detail.uniform.completedCount}
+          total={detail.uniform.total}
+          label={`${detail.uniform.completedCount} dari ${detail.uniform.total} item siap`}
         />
       ) : null}
 
-      <View style={styles.footer}>
-        <Text style={[styles.brand, { color: theme.colors.textMuted }]}>
-          AsistenKu (AKU) · data tersimpan di perangkat
-        </Text>
-      </View>
+      <SectionHeader title="Kelola" />
+      <ListRow
+        testID="dashboard-link-subjects"
+        title="Mata pelajaran"
+        meta={`${detail?.subjects?.length ?? 0} mapel terdaftar`}
+        onPress={() => navigation.navigate('Subjects')}
+        accessibilityHint="Membuka daftar mata pelajaran"
+      />
+      <ListRow
+        testID="dashboard-link-settings"
+        title="Pengaturan"
+        meta="Nama siswa, data contoh, hapus semua data"
+        onPress={openSettings}
+        accessibilityHint="Membuka pengaturan"
+      />
 
-      <Modal
+      <Text style={[theme.typography.caption, styles.footer, { color: theme.colors.textMuted }]}>
+        AsistenKu (AKU) · semua data tersimpan di HP ini, tanpa internet
+      </Text>
+
+      <Sheet
         visible={settingsOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setSettingsOpen(false)}
+        title="Pengaturan"
+        onClose={() => setSettingsOpen(false)}
+        footer={<PrimaryButton label="Simpan nama" onPress={() => void saveName()} />}
       >
-        <View style={styles.modalBackdrop}>
-          <View
-            style={[
-              styles.modalCard,
-              { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-            ]}
-          >
-            <ScrollView contentContainerStyle={styles.modalContent}>
-              <Text accessibilityRole="header" style={[styles.modalTitle, { color: theme.colors.text }]}>
-                Pengaturan
-              </Text>
-              <TextField
-                label="Nama siswa"
-                value={nameDraft}
-                onChangeText={setNameDraft}
-                placeholder="Nama kamu"
-                testID="profile-name"
-              />
-              <PrimaryButton label="Simpan nama" onPress={() => void saveName()} />
-              <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
-              <Text style={[styles.modalHint, { color: theme.colors.textMuted }]}>
-                Data contoh hanya untuk mencoba aplikasi. Semua data tersimpan di HP ini dan
-                tidak dikirim ke mana pun.
-              </Text>
-              <PrimaryButton label="Muat data contoh" tone="ghost" onPress={confirmDemo} />
-              <PrimaryButton label="Kosongkan semua data" tone="danger" onPress={confirmClear} />
-              <PrimaryButton label="Tutup" tone="ghost" onPress={() => setSettingsOpen(false)} />
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+        <TextField
+          label="Nama siswa"
+          value={nameDraft}
+          onChangeText={setNameDraft}
+          placeholder="Nama kamu"
+          testID="profile-name"
+        />
+        <Text style={[theme.typography.caption, { color: theme.colors.textMuted }]}>
+          Data contoh hanya untuk mencoba aplikasi. Semua data tersimpan di perangkat ini dan tidak
+          dikirim ke mana pun.
+        </Text>
+        <PrimaryButton label="Muat data contoh" tone="ghost" onPress={confirmDemo} />
+        <PrimaryButton label="Kosongkan semua data" tone="danger" onPress={confirmClear} />
+      </Sheet>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  inlineBadge: { marginTop: 6 },
-  footer: { marginTop: 12 },
-  brand: { fontSize: 12, textAlign: 'center' },
-  gear: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
-  modalCard: {
-    maxHeight: '85%',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  modalContent: { padding: 20, gap: 12 },
-  modalTitle: { fontSize: 20, fontWeight: '700' },
-  modalHint: { fontSize: 13, lineHeight: 19 },
-  divider: { height: StyleSheet.hairlineWidth, width: '100%' },
+  stats: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  gear: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  footer: { textAlign: 'center', marginTop: 16 },
 });

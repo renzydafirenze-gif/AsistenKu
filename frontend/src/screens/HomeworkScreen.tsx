@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, Text } from 'react-native';
 
-import { Card } from '../components/Card';
-import { CardActions } from '../components/CardActions';
 import { EmptyState } from '../components/EmptyState';
+import { Fab } from '../components/Fab';
+import { ListRow } from '../components/ListRow';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { Screen } from '../components/Screen';
-import { StatusBadge } from '../components/StatusBadge';
+import { SectionHeader } from '../components/SectionHeader';
+import { Sheet } from '../components/Sheet';
 import { TextField } from '../components/TextField';
 import type { Homework } from '../api/types';
 import { todayKey } from '../offline/repository';
@@ -14,9 +15,10 @@ import { useAppDispatch, useAppSelector } from '../store';
 import { completeHomework, refreshAll, removeHomework, saveHomework } from '../store/dataSlice';
 import { useTheme } from '../theme/ThemeProvider';
 import { brand } from '../theme/tokens';
-import { formatDateKey, formatIndonesianDate, relativeDayLabel } from '../utils/format';
+import { formatIndonesianDate } from '../utils/format';
+import { groupByDay } from '../utils/group';
 
-const LATE = '#C0392B';
+const LATE = brand.danger;
 
 const errorMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
@@ -26,18 +28,16 @@ const errorMessage = (error: unknown) => {
   return 'Perubahan tidak tersimpan.';
 };
 
+const emptyForm = () => ({ title: '', subjectName: '', dueDate: todayKey(), description: '' });
+
 export function HomeworkScreen() {
   const theme = useTheme();
   const dispatch = useAppDispatch();
   const { data, status, error } = useAppSelector((state) => state.data.homework);
-  const today = formatDateKey(new Date());
 
-  const [formOpen, setFormOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [title, setTitle] = useState('');
-  const [subjectName, setSubjectName] = useState('');
-  const [dueDate, setDueDate] = useState(todayKey());
-  const [description, setDescription] = useState('');
+  const [form, setForm] = useState(emptyForm());
 
   const refresh = useCallback(() => {
     void dispatch(refreshAll());
@@ -49,174 +49,160 @@ export function HomeworkScreen() {
 
   const openCreate = () => {
     setEditingId(null);
-    setTitle('');
-    setSubjectName('');
-    setDueDate(todayKey());
-    setDescription('');
-    setFormOpen(true);
+    setForm(emptyForm());
+    setSheetOpen(true);
   };
 
   const openEdit = (homework: Homework) => {
     setEditingId(homework.id);
-    setTitle(homework.title);
-    setSubjectName(homework.subject?.name ?? '');
-    setDueDate(homework.dueDate.slice(0, 10));
-    setDescription(homework.description ?? '');
-    setFormOpen(true);
+    setForm({
+      title: homework.title,
+      subjectName: homework.subject?.name ?? '',
+      dueDate: homework.dueDate.slice(0, 10),
+      description: homework.description ?? '',
+    });
+    setSheetOpen(true);
   };
 
   const submit = async () => {
     try {
-      await dispatch(
-        saveHomework({
-          input: { title, subjectName, dueDate, description },
-          id: editingId ?? undefined,
-        }),
-      ).unwrap();
-      setFormOpen(false);
+      await dispatch(saveHomework({ input: form, id: editingId ?? undefined })).unwrap();
+      setSheetOpen(false);
     } catch (failure) {
       Alert.alert('Gagal menyimpan', errorMessage(failure));
     }
   };
 
-  const confirmDelete = (homework: Homework) => {
-    Alert.alert('Hapus PR?', homework.title, [
+  const remove = () => {
+    if (!editingId) return;
+    const id = editingId;
+    Alert.alert('Hapus PR?', form.title, [
       { text: 'Batal', style: 'cancel' },
       {
         text: 'Hapus',
         style: 'destructive',
         onPress: () => {
-          dispatch(removeHomework(homework.id)).unwrap().catch((failure) => {
-            Alert.alert('Gagal menghapus', errorMessage(failure));
-          });
+          setSheetOpen(false);
+          dispatch(removeHomework(id))
+            .unwrap()
+            .catch((failure) => Alert.alert('Gagal menghapus', errorMessage(failure)));
         },
       },
     ]);
   };
 
+  const complete = () => {
+    if (!editingId) return;
+    const id = editingId;
+    dispatch(completeHomework(id))
+      .unwrap()
+      .then(() => setSheetOpen(false))
+      .catch((failure) => Alert.alert('Gagal menyimpan', errorMessage(failure)));
+  };
+
+  const editing = editingId ? data.find((item) => item.id === editingId) : undefined;
+  const groups = groupByDay(todayKey(), data, (item) => item.dueDate.slice(0, 10));
+  const lateCount = data.filter((item) => item.isLate).length;
+
   return (
     <Screen
+      eyebrow="AsistenKu"
       title="Pekerjaan rumah"
-      subtitle="PR terlambat berwarna merah dan tidak bisa dihapus."
+      subtitle={
+        data.length === 0
+          ? 'Belum ada tugas tercatat'
+          : `${data.length} tugas${lateCount > 0 ? ` · ${lateCount} terlambat` : ' · semua aman'}`
+      }
       refreshing={status === 'loading'}
       onRefresh={refresh}
+      floating={<Fab label="Tambah PR" onPress={openCreate} accessibilityHint="Mencatat PR baru" />}
     >
-      {error ? (
-        <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
-          {error}
-        </Text>
+      {error ? <EmptyState title="Gagal memuat data" hint={error} icon="alert-circle-outline" /> : null}
+
+      {status !== 'loading' && data.length === 0 ? (
+        <EmptyState
+          icon="book-outline"
+          title="Belum ada PR"
+          hint="Catat tugas beserta tenggatnya agar tidak terlewat."
+        />
       ) : null}
 
-      {formOpen ? (
-        <View style={[styles.form, { borderColor: theme.colors.border }]}>
-          <Text style={[styles.formTitle, { color: theme.colors.text }]}>
-            {editingId ? 'Ubah PR' : 'PR baru'}
-          </Text>
-          <TextField
-            label="Judul"
-            value={title}
-            onChangeText={setTitle}
-            placeholder="Contoh: Latihan pecahan halaman 42"
-            testID="homework-title"
-          />
-          <TextField
-            label="Mata pelajaran"
-            value={subjectName}
-            onChangeText={setSubjectName}
-            placeholder="Contoh: Matematika"
-            testID="homework-subject"
-          />
-          <TextField
-            label="Tenggat (YYYY-MM-DD)"
-            value={dueDate}
-            onChangeText={setDueDate}
-            placeholder="2026-11-05"
-            autoCapitalize="none"
-            testID="homework-due"
-          />
-          <TextField
-            label="Catatan (opsional)"
-            value={description}
-            onChangeText={setDescription}
-            placeholder="Detail tugas"
-            testID="homework-description"
-          />
-          <PrimaryButton label="Simpan PR" onPress={() => void submit()} />
-          <PrimaryButton label="Batal" tone="ghost" onPress={() => setFormOpen(false)} />
-        </View>
-      ) : (
-        <PrimaryButton label="Tambah PR" onPress={openCreate} />
-      )}
-
-      {status !== 'loading' && data.length === 0 && !formOpen ? (
-        <EmptyState title="Belum ada PR" hint="Tekan “Tambah PR” untuk mencatat tugas pertama." />
-      ) : null}
-
-      {data.map((homework) => {
-        const overdue = homework.isLate || homework.isOverdue;
-        const submitted = homework.assignment?.status === 'SUBMITTED';
-        const accent = overdue ? LATE : (homework.accentColor ?? brand.primary);
-        const dueKey = homework.dueDate.slice(0, 10);
-        return (
-          <Card
-            key={homework.id}
-            testID={`homework-${homework.id}`}
-            title={homework.title}
-            subtitle={`${homework.subject?.name ?? 'Tanpa mapel'} · tenggat ${formatIndonesianDate(dueKey)}`}
-            tone={accent}
-            badge={{ label: overdue ? 'Terlambat' : relativeDayLabel(today, dueKey), color: accent }}
-          >
-            {homework.description ? (
-              <Text style={[styles.description, { color: theme.colors.textMuted }]}>
-                {homework.description}
-              </Text>
-            ) : null}
-            <View style={styles.row}>
-              <StatusBadge
-                status={overdue ? 'OVERDUE' : submitted ? 'SUBMITTED' : 'UPCOMING'}
-                label={
-                  overdue
-                    ? submitted
-                      ? 'Dikumpulkan terlambat'
-                      : 'Terlambat'
-                    : submitted
-                      ? 'Selesai'
-                      : 'Belum selesai'
-                }
+      {groups.map((group) => (
+        <React.Fragment key={group.title}>
+          <SectionHeader title={group.title} aside={`${group.items.length}`} />
+          {group.items.map((homework) => {
+            const overdue = homework.isLate || homework.isOverdue;
+            const submitted = homework.assignment?.status === 'SUBMITTED';
+            const dueKey = homework.dueDate.slice(0, 10);
+            const trailing = submitted ? (overdue ? 'Terlambat' : 'Selesai') : overdue ? 'Terlambat' : formatIndonesianDate(dueKey);
+            return (
+              <ListRow
+                key={homework.id}
+                testID={`homework-${homework.id}`}
+                title={homework.title}
+                meta={homework.subject?.name ?? 'Tanpa mapel'}
+                detail={homework.description ?? undefined}
+                trailing={trailing}
+                tone={overdue ? LATE : theme.colors.primary}
+                onPress={() => openEdit(homework)}
+                accessibilityHint="Membuka detail PR"
               />
-            </View>
-            {!submitted ? (
-              <View style={styles.action}>
-                <PrimaryButton
-                  label="Tandai selesai"
-                  onPress={() => {
-                    dispatch(completeHomework(homework.id)).unwrap().catch((failure) => {
-                      Alert.alert('Gagal menyimpan', errorMessage(failure));
-                    });
-                  }}
-                  accessibilityHint={`Menandai PR ${homework.title} sudah dikumpulkan`}
-                />
-              </View>
+            );
+          })}
+        </React.Fragment>
+      ))}
+
+      <Sheet
+        visible={sheetOpen}
+        title={editingId ? 'Ubah PR' : 'PR baru'}
+        onClose={() => setSheetOpen(false)}
+        footer={
+          <>
+            <PrimaryButton label="Simpan PR" onPress={() => void submit()} />
+            {editing && !editing.isLate ? (
+              <PrimaryButton label="Hapus" tone="ghost" onPress={remove} />
             ) : null}
-            <CardActions
-              onEdit={() => openEdit(homework)}
-              onDelete={() => confirmDelete(homework)}
-              deleteDisabled={overdue}
-              deleteHint={
-                overdue ? 'PR terlambat tidak bisa dihapus' : `Hapus PR ${homework.title}`
-              }
-            />
-          </Card>
-        );
-      })}
+          </>
+        }
+      >
+        {editing?.isLate ? (
+          <Text style={[theme.typography.caption, { color: theme.colors.danger }]}>
+            PR terlambat tidak bisa dihapus. Ubah tenggatnya kalau memang salah input.
+          </Text>
+        ) : null}
+        <TextField
+          label="Judul"
+          value={form.title}
+          onChangeText={(title) => setForm((previous) => ({ ...previous, title }))}
+          placeholder="Contoh: Latihan pecahan halaman 42"
+          testID="homework-title"
+        />
+        <TextField
+          label="Mata pelajaran"
+          value={form.subjectName}
+          onChangeText={(subjectName) => setForm((previous) => ({ ...previous, subjectName }))}
+          placeholder="Contoh: Matematika"
+          testID="homework-subject"
+        />
+        <TextField
+          label="Tenggat (YYYY-MM-DD)"
+          value={form.dueDate}
+          onChangeText={(dueDate) => setForm((previous) => ({ ...previous, dueDate }))}
+          placeholder="2026-11-05"
+          autoCapitalize="none"
+          testID="homework-due"
+        />
+        <TextField
+          label="Catatan (opsional)"
+          value={form.description}
+          onChangeText={(description) => setForm((previous) => ({ ...previous, description }))}
+          placeholder="Detail tugas"
+          testID="homework-description"
+        />
+        {editing && editing.assignment?.status !== 'SUBMITTED' ? (
+          <PrimaryButton label="Tandai selesai" tone="ghost" onPress={complete} />
+        ) : null}
+      </Sheet>
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  description: { fontSize: 14, marginTop: 4 },
-  row: { marginTop: 8 },
-  action: { marginTop: 8 },
-  form: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, gap: 10 },
-  formTitle: { fontSize: 16, fontWeight: '700' },
-});

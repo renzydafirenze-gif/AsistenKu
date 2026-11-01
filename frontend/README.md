@@ -72,6 +72,35 @@ phones.
 `dataSlice` keeps one status per resource; any storage failure surfaces as an
 error while keeping the previously loaded rows on screen.
 
+### Design
+
+Direction was researched from published mobile UX guidance (2026 pattern
+references, Material/Apple layout rules) and from how student planners such as
+My Study Life, Class Timetable and Notion templates structure their screens.
+Nothing was copied: no assets, no layouts, no colours from those apps — only the
+conventions below, applied to this content.
+
+- **Five tabs, one level down.** Beranda, Piket, PR, Ujian, Seragam. Six tabs
+  cramped the bar, so Mapel became a stack screen reached from Beranda's
+  "Kelola" section, with its own back affordance.
+- **Bottom sheets, not centred modals.** Every form and Pengaturan slides up
+  from the bottom with a drag handle: closer to the thumb, dismissable from the
+  backdrop, never covering the tab bar.
+- **Lists, not card soup.** Rows are grouped by relative day (Terlewat, Hari
+  ini, Besok, Minggu ini, Berikutnya) or by category/first letter, with hairline
+  separators, a thin status rule, a trailing label and one tap target.
+- **Status is text plus a dot.** Colour never carries meaning alone, which also
+  keeps screen readers correct.
+- **Dashboard answers "what now".** Greeting, three stat tiles, a "Hari ini"
+  agenda, uniform progress, then explicit management links.
+- **Empty states teach.** Icon, one sentence on why it is empty, plus the FAB
+  and inline copy for the next step.
+- **Create is a FAB** in the bottom-right; pull-to-refresh stays on every list.
+
+Tokens live in `src/theme/tokens.ts` (one accent, semantic status colours, six
+type steps, hairline borders, no shadows — elevation in dark mode comes from
+surface colour).
+
 ### Accessibility
 
 - Every interactive element has a role, label and state (`checkbox`, `button`,
@@ -91,7 +120,7 @@ error while keeping the previously loaded rows on screen.
 ## Testing
 
 ```bash
-npm test                  # 73 tests, 6 suites
+npm test                  # 77 tests, 6 suites
 npm run test:coverage     # gate: statements 80, branches 70, functions 80, lines 80
 ```
 

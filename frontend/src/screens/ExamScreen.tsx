@@ -1,19 +1,21 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, Text } from 'react-native';
 
-import { Card } from '../components/Card';
-import { CardActions } from '../components/CardActions';
 import { EmptyState } from '../components/EmptyState';
+import { Fab } from '../components/Fab';
+import { ListRow } from '../components/ListRow';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { Screen } from '../components/Screen';
-import { StatusBadge } from '../components/StatusBadge';
+import { SectionHeader } from '../components/SectionHeader';
+import { Sheet } from '../components/Sheet';
 import { TextField } from '../components/TextField';
 import type { Exam } from '../api/types';
 import { todayKey } from '../offline/repository';
 import { useAppDispatch, useAppSelector } from '../store';
 import { publishExam, refreshAll, removeExam, saveExam } from '../store/dataSlice';
 import { useTheme } from '../theme/ThemeProvider';
-import { formatDateKey, formatIndonesianDay, relativeDayLabel } from '../utils/format';
+import { formatIndonesianDay } from '../utils/format';
+import { groupByDay } from '../utils/group';
 
 const errorMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
@@ -23,20 +25,23 @@ const errorMessage = (error: unknown) => {
   return 'Perubahan tidak tersimpan.';
 };
 
+const emptyForm = () => ({
+  title: '',
+  subjectName: '',
+  examDate: todayKey(),
+  startTime: '07:30',
+  endTime: '09:00',
+  room: '',
+});
+
 export function ExamScreen() {
   const theme = useTheme();
   const dispatch = useAppDispatch();
   const { data, status, error } = useAppSelector((state) => state.data.exams);
-  const today = formatDateKey(new Date());
 
-  const [formOpen, setFormOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [title, setTitle] = useState('');
-  const [subjectName, setSubjectName] = useState('');
-  const [examDate, setExamDate] = useState(todayKey());
-  const [startTime, setStartTime] = useState('07:30');
-  const [endTime, setEndTime] = useState('09:00');
-  const [room, setRoom] = useState('');
+  const [form, setForm] = useState(emptyForm());
 
   const refresh = useCallback(() => {
     void dispatch(refreshAll());
@@ -48,56 +53,35 @@ export function ExamScreen() {
 
   const openCreate = () => {
     setEditingId(null);
-    setTitle('');
-    setSubjectName('');
-    setExamDate(todayKey());
-    setStartTime('07:30');
-    setEndTime('09:00');
-    setRoom('');
-    setFormOpen(true);
+    setForm(emptyForm());
+    setSheetOpen(true);
   };
 
   const openEdit = (exam: Exam) => {
     setEditingId(exam.id);
-    setTitle(exam.title);
-    setSubjectName(exam.subject?.name ?? '');
-    setExamDate(exam.examDate);
-    setStartTime(exam.startTime);
-    setEndTime(exam.endTime);
-    setRoom(exam.room ?? '');
-    setFormOpen(true);
+    setForm({
+      title: exam.title,
+      subjectName: exam.subject?.name ?? '',
+      examDate: exam.examDate,
+      startTime: exam.startTime,
+      endTime: exam.endTime,
+      room: exam.room ?? '',
+    });
+    setSheetOpen(true);
   };
 
   const submit = async () => {
     try {
-      await dispatch(
-        saveExam({
-          input: { title, subjectName, examDate, startTime, endTime, room },
-          id: editingId ?? undefined,
-        }),
-      ).unwrap();
-      setFormOpen(false);
+      await dispatch(saveExam({ input: form, id: editingId ?? undefined })).unwrap();
+      setSheetOpen(false);
     } catch (failure) {
       Alert.alert('Gagal menyimpan', errorMessage(failure));
     }
   };
 
-  const run = (action: Promise<unknown>, label: string) => {
-    action.catch((failure) => Alert.alert(label, errorMessage(failure)));
-  };
-
-  const confirmDelete = (exam: Exam) => {
-    Alert.alert('Hapus ujian?', exam.title, [
-      { text: 'Batal', style: 'cancel' },
-      {
-        text: 'Hapus',
-        style: 'destructive',
-        onPress: () => run(dispatch(removeExam(exam.id)).unwrap(), 'Gagal menghapus'),
-      },
-    ]);
-  };
-
-  const confirmPublish = (exam: Exam) => {
+  const publish = () => {
+    if (!editingId) return;
+    const id = editingId;
     Alert.alert(
       'Publikasikan ujian?',
       'Jadwal yang sudah dipublikasikan tidak bisa diubah atau dihapus.',
@@ -105,144 +89,155 @@ export function ExamScreen() {
         { text: 'Batal', style: 'cancel' },
         {
           text: 'Publikasikan',
-          onPress: () => run(dispatch(publishExam(exam.id)).unwrap(), 'Gagal mempublikasikan'),
+          onPress: () => {
+            dispatch(publishExam(id))
+              .unwrap()
+              .then(() => setSheetOpen(false))
+              .catch((failure) => Alert.alert('Gagal mempublikasikan', errorMessage(failure)));
+          },
         },
       ],
     );
   };
 
+  const remove = () => {
+    if (!editingId) return;
+    const id = editingId;
+    Alert.alert('Hapus ujian?', form.title, [
+      { text: 'Batal', style: 'cancel' },
+      {
+        text: 'Hapus',
+        style: 'destructive',
+        onPress: () => {
+          setSheetOpen(false);
+          dispatch(removeExam(id))
+            .unwrap()
+            .catch((failure) => Alert.alert('Gagal menghapus', errorMessage(failure)));
+        },
+      },
+    ]);
+  };
+
+  const editing = editingId ? data.find((exam) => exam.id === editingId) : undefined;
+  const locked = !!editing?.isLocked;
+  const groups = groupByDay(todayKey(), data, (exam) => exam.examDate);
+
   return (
     <Screen
-      title="Jadwal ujian"
-      subtitle="Jadwal yang sudah dipublikasikan tidak dapat diubah."
+      eyebrow="AsistenKu"
+      title="Ujian"
+      subtitle="Jadwal yang dipublikasikan terkunci dan tidak bisa diubah."
       refreshing={status === 'loading'}
       onRefresh={refresh}
+      floating={<Fab label="Tambah ujian" onPress={openCreate} accessibilityHint="Mencatat jadwal ujian" />}
     >
-      {error ? (
-        <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
-          {error}
-        </Text>
+      {error ? <EmptyState title="Gagal memuat data" hint={error} icon="alert-circle-outline" /> : null}
+
+      {status !== 'loading' && data.length === 0 ? (
+        <EmptyState
+          icon="school-outline"
+          title="Belum ada ujian"
+          hint="Catat tanggal, jam dan ruang ujian supaya tidak bentrok."
+        />
       ) : null}
 
-      {formOpen ? (
-        <View style={[styles.form, { borderColor: theme.colors.border }]}>
-          <Text style={[styles.formTitle, { color: theme.colors.text }]}>
-            {editingId ? 'Ubah ujian' : 'Ujian baru'}
-          </Text>
-          <TextField
-            label="Judul"
-            value={title}
-            onChangeText={setTitle}
-            placeholder="Contoh: Ulangan harian Matematika"
-            testID="exam-title"
-          />
-          <TextField
-            label="Mata pelajaran"
-            value={subjectName}
-            onChangeText={setSubjectName}
-            placeholder="Contoh: Matematika"
-            testID="exam-subject"
-          />
-          <TextField
-            label="Tanggal (YYYY-MM-DD)"
-            value={examDate}
-            onChangeText={setExamDate}
-            placeholder="2026-11-05"
-            autoCapitalize="none"
-            testID="exam-date"
-          />
-          <View style={styles.timeRow}>
-            <View style={styles.timeCell}>
-              <TextField
-                label="Mulai"
-                value={startTime}
-                onChangeText={setStartTime}
-                placeholder="07:30"
-                autoCapitalize="none"
-                testID="exam-start"
-              />
-            </View>
-            <View style={styles.timeCell}>
-              <TextField
-                label="Selesai"
-                value={endTime}
-                onChangeText={setEndTime}
-                placeholder="09:00"
-                autoCapitalize="none"
-                testID="exam-end"
-              />
-            </View>
-          </View>
-          <TextField
-            label="Ruang (opsional)"
-            value={room}
-            onChangeText={setRoom}
-            placeholder="Ruang 12"
-            testID="exam-room"
-          />
-          <PrimaryButton label="Simpan ujian" onPress={() => void submit()} />
-          <PrimaryButton label="Batal" tone="ghost" onPress={() => setFormOpen(false)} />
-        </View>
-      ) : (
-        <PrimaryButton label="Tambah ujian" onPress={openCreate} />
-      )}
-
-      {status !== 'loading' && data.length === 0 && !formOpen ? (
-        <EmptyState title="Belum ada ujian" hint="Tekan “Tambah ujian” untuk mencatat jadwal." />
-      ) : null}
-
-      {data.map((exam) => {
-        const until = exam.daysUntil ?? 0;
-        const statusKey = until < 0 ? 'OVERDUE' : until === 0 ? 'TODAY' : 'UPCOMING';
-        const locked = !!exam.isLocked;
-        return (
-          <Card
-            key={exam.id}
-            testID={`exam-${exam.id}`}
-            title={exam.title}
-            subtitle={`${exam.subject?.name ?? 'Mata pelajaran'} · ${exam.startTime}–${exam.endTime}${
-              exam.room ? ` · ${exam.room}` : ''
-            }`}
-            badge={{ label: relativeDayLabel(today, exam.examDate), color: theme.colors.secondary }}
-          >
-            <Text style={[styles.date, { color: theme.colors.textMuted }]}>
-              {formatIndonesianDay(exam.examDate)}
-            </Text>
-            <View style={styles.row}>
-              <StatusBadge status={statusKey} label={locked ? 'Terpublikasi' : 'Draf'} />
-            </View>
-            {!locked ? (
-              <View style={styles.action}>
-                <PrimaryButton
-                  label="Publikasikan"
-                  onPress={() => confirmPublish(exam)}
-                  accessibilityHint="Mengunci jadwal ujian ini"
-                />
-              </View>
-            ) : null}
-            <CardActions
-              onEdit={locked ? undefined : () => openEdit(exam)}
-              onDelete={locked ? undefined : () => confirmDelete(exam)}
+      {groups.map((group) => (
+        <React.Fragment key={group.title}>
+          <SectionHeader title={group.title} aside={`${group.items.length}`} />
+          {group.items.map((exam) => (
+            <ListRow
+              key={exam.id}
+              testID={`exam-${exam.id}`}
+              title={exam.title}
+              meta={`${exam.subject?.name ?? 'Mata pelajaran'} · ${exam.startTime}–${exam.endTime}${
+                exam.room ? ` · ${exam.room}` : ''
+              }`}
+              detail={formatIndonesianDay(exam.examDate)}
+              trailing={exam.isLocked ? 'Terpublikasi' : 'Draf'}
+              tone={exam.isLocked ? theme.colors.accent : theme.colors.secondary}
+              onPress={() => openEdit(exam)}
+              accessibilityHint="Membuka detail ujian"
             />
-            {locked ? (
-              <Text style={[styles.locked, { color: theme.colors.textMuted }]}>
-                Terkunci setelah dipublikasikan.
-              </Text>
-            ) : null}
-          </Card>
-        );
-      })}
+          ))}
+        </React.Fragment>
+      ))}
+
+      <Sheet
+        visible={sheetOpen}
+        title={editingId ? (locked ? 'Detail ujian' : 'Ubah ujian') : 'Ujian baru'}
+        onClose={() => setSheetOpen(false)}
+        footer={
+          locked ? (
+            <PrimaryButton label="Tutup" tone="ghost" onPress={() => setSheetOpen(false)} />
+          ) : (
+            <>
+              <PrimaryButton label="Simpan ujian" onPress={() => void submit()} />
+              {editingId ? (
+                <>
+                  <PrimaryButton label="Publikasikan" tone="ghost" onPress={publish} />
+                  <PrimaryButton label="Hapus" tone="ghost" onPress={remove} />
+                </>
+              ) : null}
+            </>
+          )
+        }
+      >
+        {locked ? (
+          <Text style={[theme.typography.caption, { color: theme.colors.textMuted }]}>
+            Terkunci setelah dipublikasikan: {formatIndonesianDay(form.examDate)} · {form.startTime}–
+            {form.endTime}
+            {form.room ? ` · ${form.room}` : ''}
+          </Text>
+        ) : (
+          <>
+            <TextField
+              label="Judul"
+              value={form.title}
+              onChangeText={(title) => setForm((previous) => ({ ...previous, title }))}
+              placeholder="Contoh: Ulangan harian Matematika"
+              testID="exam-title"
+            />
+            <TextField
+              label="Mata pelajaran"
+              value={form.subjectName}
+              onChangeText={(subjectName) => setForm((previous) => ({ ...previous, subjectName }))}
+              placeholder="Contoh: Matematika"
+              testID="exam-subject"
+            />
+            <TextField
+              label="Tanggal (YYYY-MM-DD)"
+              value={form.examDate}
+              onChangeText={(examDate) => setForm((previous) => ({ ...previous, examDate }))}
+              placeholder="2026-11-05"
+              autoCapitalize="none"
+              testID="exam-date"
+            />
+            <TextField
+              label="Mulai (HH:MM)"
+              value={form.startTime}
+              onChangeText={(startTime) => setForm((previous) => ({ ...previous, startTime }))}
+              placeholder="07:30"
+              autoCapitalize="none"
+              testID="exam-start"
+            />
+            <TextField
+              label="Selesai (HH:MM)"
+              value={form.endTime}
+              onChangeText={(endTime) => setForm((previous) => ({ ...previous, endTime }))}
+              placeholder="09:00"
+              autoCapitalize="none"
+              testID="exam-end"
+            />
+            <TextField
+              label="Ruang (opsional)"
+              value={form.room}
+              onChangeText={(room) => setForm((previous) => ({ ...previous, room }))}
+              placeholder="Ruang 12"
+              testID="exam-room"
+            />
+          </>
+        )}
+      </Sheet>
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  date: { fontSize: 14, marginTop: 4 },
-  row: { marginTop: 8 },
-  action: { marginTop: 8 },
-  form: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, gap: 10 },
-  formTitle: { fontSize: 16, fontWeight: '700' },
-  timeRow: { flexDirection: 'row', gap: 8 },
-  timeCell: { flex: 1 },
-  locked: { fontSize: 12, marginTop: 6 },
-});

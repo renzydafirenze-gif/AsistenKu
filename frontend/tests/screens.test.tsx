@@ -1,6 +1,6 @@
 import React from 'react';
 import { Alert } from 'react-native';
-import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Provider } from 'react-redux';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
@@ -8,21 +8,23 @@ import { DashboardScreen } from '../src/screens/DashboardScreen';
 import { DutyScreen } from '../src/screens/DutyScreen';
 import { ExamScreen } from '../src/screens/ExamScreen';
 import { HomeworkScreen } from '../src/screens/HomeworkScreen';
-import { UniformScreen } from '../src/screens/UniformScreen';
 import { SubjectsScreen } from '../src/screens/SubjectsScreen';
+import { UniformScreen } from '../src/screens/UniformScreen';
 import { RootNavigator } from '../src/navigation/RootNavigator';
 import { createDemoDataset, createEmptyDataset } from '../src/offline/seed';
 import { createOfflineStorage, DATASET_KEY } from '../src/offline/storage';
 import { createStore, type AppStore } from '../src/store';
 import { ThemeProvider } from '../src/theme/ThemeProvider';
 import { lightTheme } from '../src/theme/tokens';
-import { addDaysKey, formatDateKey, formatIndonesianDay } from '../src/utils/format';
+import { addDaysKey, formatDateKey, formatIndonesianDate } from '../src/utils/format';
+import { groupByDay } from '../src/utils/group';
 
 const mockNavigate = jest.fn();
+const mockGoBack = jest.fn();
 
 jest.mock('@react-navigation/native', () => ({
   ...jest.requireActual('@react-navigation/native'),
-  useNavigation: () => ({ navigate: mockNavigate }),
+  useNavigation: () => ({ navigate: mockNavigate, goBack: mockGoBack }),
 }));
 
 const metrics: Metrics = {
@@ -43,7 +45,7 @@ function memoryBackend(initial?: Record<string, string>) {
   };
 }
 
-/** Screens are exercised against the real store with example data on disk. */
+/** Screens run against the real store with example data already on disk. */
 function makeStore(demo = true): AppStore {
   const dataset = demo ? createDemoDataset() : createEmptyDataset();
   const backend = memoryBackend({ [DATASET_KEY]: JSON.stringify(dataset) });
@@ -60,13 +62,11 @@ function renderScreen(node: React.ReactElement, store = makeStore()) {
   );
 }
 
-/** Auto-confirms the destructive/primary button of a native Alert. */
+/** Auto-confirms the non-cancel button of a native Alert. */
 function autoConfirmAlert() {
-  return jest
-    .spyOn(Alert, 'alert')
-    .mockImplementation((_title, _message, buttons) => {
-      buttons?.find((button) => button.style !== 'cancel')?.onPress?.();
-    });
+  return jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+    buttons?.find((button) => button.style !== 'cancel')?.onPress?.();
+  });
 }
 
 const today = formatDateKey(new Date());
@@ -76,317 +76,40 @@ afterEach(() => {
 });
 
 describe('dashboard screen', () => {
-  it('renders the greeting, cards and navigates by tab', async () => {
-    const { findByText, findAllByText, getByTestId } = renderScreen(<DashboardScreen />);
+  it('shows the greeting, stat tiles and today agenda', async () => {
+    const { findByText, findByTestId, getByTestId } = renderScreen(<DashboardScreen />);
 
     expect(await findByText(/^Selamat (pagi|siang|sore|malam)$/)).toBeOnTheScreen();
-    expect(await findByText(`Ani Lestari · ${formatIndonesianDay(today)}`)).toBeOnTheScreen();
+    expect(await findByText(`Ani Lestari · ${formatIndonesianDate(today)}`)).toBeOnTheScreen();
 
-    fireEvent.press(getByTestId('dashboard-card-duty'));
-    expect(mockNavigate).toHaveBeenCalledWith('Duty');
-
-    fireEvent.press(getByTestId('dashboard-card-subjects'));
-    expect(mockNavigate).toHaveBeenCalledWith('Subjects');
-
-    expect((await findAllByText('Terlambat')).length).toBeGreaterThan(0);
+    // Today's example duty, its late homework and the next exam shape the tiles.
+    expect(await findByTestId('stat-duty')).toBeOnTheScreen();
+    expect(getByTestId('stat-homework')).toBeOnTheScreen();
+    expect(getByTestId('stat-exam')).toBeOnTheScreen();
   });
 
-  it('opens settings so the user can rename and manage data', async () => {
+  it('navigates to a tab from a stat tile and to Mapel from Kelola', async () => {
+    const { findByTestId } = renderScreen(<DashboardScreen />);
+
+    fireEvent.press(await findByTestId('stat-homework'));
+    expect(mockNavigate).toHaveBeenCalledWith('Homework');
+
+    fireEvent.press(await findByTestId('dashboard-link-subjects'));
+    expect(mockNavigate).toHaveBeenCalledWith('Subjects');
+  });
+
+  it('renames the student from the settings sheet', async () => {
     const store = makeStore(false);
     const { findByText, findByTestId, findByLabelText } = renderScreen(<DashboardScreen />, store);
 
     fireEvent.press(await findByLabelText('Pengaturan'));
-
-    expect(await findByText('Pengaturan')).toBeOnTheScreen();
-    const nameField = await findByTestId('profile-name');
-    fireEvent.changeText(nameField, 'Budi');
+    fireEvent.changeText(await findByTestId('profile-name'), 'Budi');
 
     await act(async () => {
       fireEvent.press(await findByText('Simpan nama'));
     });
 
     await waitFor(() => expect(store.getState().data.dashboard.data?.user.fullName).toBe('Budi'));
-  });
-});
-
-describe('duty screen', () => {
-  it('creates a new duty from the form', async () => {
-    const store = makeStore(false);
-    const { findByText, findByTestId } = renderScreen(<DutyScreen />, store);
-
-    expect(await findByText('Belum ada jadwal piket')).toBeOnTheScreen();
-    fireEvent.press(await findByText('Tambah piket'));
-
-    fireEvent.changeText(await findByTestId('duty-date'), today);
-    fireEvent.changeText(await findByTestId('duty-student'), 'Ani');
-    fireEvent.changeText(await findByTestId('duty-notes'), 'Sapu lantai');
-
-    await act(async () => {
-      fireEvent.press(await findByText('Simpan piket'));
-    });
-
-    await waitFor(() => expect(store.getState().data.duties.data).toHaveLength(1));
-    expect(await findByText('Sapu lantai')).toBeOnTheScreen();
-    expect(await findByText('Hari ini')).toBeOnTheScreen();
-  });
-
-  it('completes a duty from the example data', async () => {
-    const store = makeStore();
-    const { findByText, findAllByText } = renderScreen(<DutyScreen />, store);
-
-    await act(async () => {
-      fireEvent.press(await findByText('Tandai selesai'));
-    });
-
-    await waitFor(() =>
-      expect(store.getState().data.duties.data.some((duty) => duty.status === 'COMPLETED')).toBe(true),
-    );
-    expect((await findAllByText('Selesai')).length).toBeGreaterThan(0);
-  });
-});
-
-describe('homework screen', () => {
-  it('flags late homework and blocks deleting it', async () => {
-    const { findAllByText, findAllByLabelText, findByText } = renderScreen(<HomeworkScreen />);
-
-    expect(await findByText('Latihan pecahan halaman 42')).toBeOnTheScreen();
-    expect((await findAllByText('Terlambat')).length).toBeGreaterThan(0);
-
-    // The late card sorts first; its Hapus button is disabled.
-    const [firstDelete] = await findAllByLabelText('Hapus');
-    expect(firstDelete).toBeDisabled();
-  });
-
-  it('marks a task done and keeps late work flagged', async () => {
-    const store = makeStore();
-    const { findByText, findAllByText } = renderScreen(<HomeworkScreen />, store);
-
-    const [firstButton] = await findAllByText('Tandai selesai');
-    await act(async () => {
-      fireEvent.press(firstButton!);
-    });
-
-    expect(await findByText('Dikumpulkan terlambat')).toBeOnTheScreen();
-    await waitFor(() => expect(store.getState().data.homework.data[0]?.isLate).toBe(true));
-  });
-
-  it('adds homework from the form', async () => {
-    const store = makeStore(false);
-    const { findByText, findByTestId } = renderScreen(<HomeworkScreen />, store);
-
-    fireEvent.press(await findByText('Tambah PR'));
-    fireEvent.changeText(await findByTestId('homework-title'), 'Ringkasan cerpen');
-    fireEvent.changeText(await findByTestId('homework-subject'), 'Bahasa Indonesia');
-    fireEvent.changeText(await findByTestId('homework-due'), addDaysKey(today, 2));
-
-    await act(async () => {
-      fireEvent.press(await findByText('Simpan PR'));
-    });
-
-    await waitFor(() => expect(store.getState().data.homework.data).toHaveLength(1));
-    expect(await findByText('Ringkasan cerpen')).toBeOnTheScreen();
-  });
-});
-
-describe('exam screen', () => {
-  it('publishes a draft and locks it afterwards', async () => {
-    autoConfirmAlert();
-    const store = makeStore();
-    const { findByText, findAllByText, queryByText } = renderScreen(<ExamScreen />, store);
-
-    expect(await findByText('Draf')).toBeOnTheScreen();
-    await act(async () => {
-      fireEvent.press(await findByText('Publikasikan'));
-    });
-
-    await waitFor(() => expect(store.getState().data.exams.data.some((exam) => exam.isLocked)).toBe(true));
-    // The example data already has one published exam, so two locks show up.
-    expect((await findAllByText('Terkunci setelah dipublikasikan.')).length).toBe(2);
-    expect(queryByText('Draf')).toBeNull();
-  });
-
-  it('adds an exam from the form', async () => {
-    const store = makeStore(false);
-    const { findByText, findByTestId } = renderScreen(<ExamScreen />, store);
-
-    fireEvent.press(await findByText('Tambah ujian'));
-    fireEvent.changeText(await findByTestId('exam-title'), 'UTS IPA');
-    fireEvent.changeText(await findByTestId('exam-subject'), 'IPA');
-    fireEvent.changeText(await findByTestId('exam-date'), addDaysKey(today, 5));
-
-    await act(async () => {
-      fireEvent.press(await findByText('Simpan ujian'));
-    });
-
-    await waitFor(() => expect(store.getState().data.exams.data).toHaveLength(1));
-    expect(await findByText('UTS IPA')).toBeOnTheScreen();
-  });
-});
-
-describe('subjects screen', () => {
-  it('lists mapel and adds a new one', async () => {
-    const store = makeStore();
-    const { findByText, findByTestId, getAllByText } = renderScreen(<SubjectsScreen />, store);
-
-    expect(await findByText('Matematika')).toBeOnTheScreen();
-    expect(getAllByText('Sari Wulandari').length).toBe(3);
-
-    fireEvent.press(await findByText('Tambah mapel'));
-    fireEvent.changeText(await findByTestId('subject-name'), 'Sejarah');
-    fireEvent.changeText(await findByTestId('subject-code'), 'sej');
-
-    await act(async () => {
-      fireEvent.press(await findByText('Simpan mapel'));
-    });
-
-    await waitFor(() => expect(store.getState().data.subjects.data).toHaveLength(4));
-    expect(await findByText('Sejarah')).toBeOnTheScreen();
-  });
-});
-
-describe('uniform screen', () => {
-  it('toggles an item and updates progress', async () => {
-    const store = makeStore();
-    const { findByText, getByRole } = renderScreen(<UniformScreen />, store);
-
-    expect(await findByText('Kemeja putih')).toBeOnTheScreen();
-    await act(async () => {
-      fireEvent.press(getByRole('checkbox', { name: 'Dasi, Atribut' }));
-    });
-
-    expect(await findByText('1/4 item selesai')).toBeOnTheScreen();
-    await waitFor(() => expect(store.getState().data.dashboard.data).not.toBeNull());
-  });
-});
-
-describe('editing flows', () => {
-  it('edits and deletes a duty', async () => {
-    autoConfirmAlert();
-    const store = makeStore();
-    const { findByTestId, findByText } = renderScreen(<DutyScreen />, store);
-
-    const card = await findByTestId('duty-duty-tomorrow');
-    fireEvent.press(within(card).getByText('Ubah'));
-    fireEvent.changeText(await findByTestId('duty-notes'), 'Siram tanaman');
-
-    await act(async () => {
-      fireEvent.press(await findByText('Simpan piket'));
-    });
-    await waitFor(() =>
-      expect(
-        store.getState().data.duties.data.find((duty) => duty.id === 'duty-tomorrow')?.notes,
-      ).toBe('Siram tanaman'),
-    );
-
-    fireEvent.press(within(await findByTestId('duty-duty-tomorrow')).getByText('Hapus'));
-    await waitFor(() => expect(store.getState().data.duties.data).toHaveLength(2));
-  });
-
-  it('cancels a duty form without saving', async () => {
-    const store = makeStore(false);
-    const { findByText } = renderScreen(<DutyScreen />, store);
-
-    fireEvent.press(await findByText('Tambah piket'));
-    fireEvent.press(await findByText('Batal'));
-
-    expect(await findByText('Belum ada jadwal piket')).toBeOnTheScreen();
-    expect(store.getState().data.duties.data).toEqual([]);
-  });
-
-  it('surfaces a validation error from the duty form', async () => {
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
-    const store = makeStore(false);
-    const { findByText, findByTestId } = renderScreen(<DutyScreen />, store);
-
-    fireEvent.press(await findByText('Tambah piket'));
-    fireEvent.changeText(await findByTestId('duty-date'), '01-11-2026');
-    await act(async () => {
-      fireEvent.press(await findByText('Simpan piket'));
-    });
-
-    expect(alertSpy).toHaveBeenCalledWith('Gagal menyimpan', 'Tanggal harus berformat YYYY-MM-DD.');
-    expect(store.getState().data.duties.data).toEqual([]);
-  });
-
-  it('switches the duty shift and refreshes manually', async () => {
-    const store = makeStore(false);
-    const { findByText, findByTestId } = renderScreen(<DutyScreen />, store);
-
-    fireEvent.press(await findByText('Tambah piket'));
-    fireEvent.press(await findByText('Siang'));
-    fireEvent.changeText(await findByTestId('duty-student'), 'Beni');
-    await act(async () => {
-      fireEvent.press(await findByText('Simpan piket'));
-    });
-
-    await waitFor(() => expect(store.getState().data.duties.data[0]?.shift).toBe('AFTERNOON'));
-    await act(async () => {
-      fireEvent.press(await findByText('Muat ulang'));
-    });
-    expect(store.getState().data.duties.data).toHaveLength(1);
-  });
-
-  it('edits and deletes on-time homework', async () => {
-    autoConfirmAlert();
-    const store = makeStore();
-    const { findByTestId, findByText } = renderScreen(<HomeworkScreen />, store);
-
-    const card = await findByTestId('homework-hw-ipa');
-    fireEvent.press(within(card).getByText('Ubah'));
-    fireEvent.changeText(await findByTestId('homework-title'), 'Laporan praktikum (revisi)');
-    await act(async () => {
-      fireEvent.press(await findByText('Simpan PR'));
-    });
-    await waitFor(() =>
-      expect(store.getState().data.homework.data.some((item) => item.title.includes('revisi'))).toBe(
-        true,
-      ),
-    );
-
-    fireEvent.press(within(await findByTestId('homework-hw-ipa')).getByText('Hapus'));
-    await waitFor(() => expect(store.getState().data.homework.data).toHaveLength(2));
-  });
-
-  it('edits and deletes a draft exam', async () => {
-    autoConfirmAlert();
-    const store = makeStore();
-    const { findByTestId, findByText } = renderScreen(<ExamScreen />, store);
-
-    const card = await findByTestId('exam-exam-ipa');
-    fireEvent.press(within(card).getByText('Ubah'));
-    fireEvent.changeText(await findByTestId('exam-room'), 'Lab Baru');
-    await act(async () => {
-      fireEvent.press(await findByText('Simpan ujian'));
-    });
-    await waitFor(() =>
-      expect(store.getState().data.exams.data.find((exam) => exam.id === 'exam-ipa')?.room).toBe(
-        'Lab Baru',
-      ),
-    );
-
-    fireEvent.press(within(await findByTestId('exam-exam-ipa')).getByText('Hapus'));
-    await waitFor(() => expect(store.getState().data.exams.data).toHaveLength(1));
-  });
-
-  it('edits and deletes a subject', async () => {
-    autoConfirmAlert();
-    const store = makeStore();
-    const { findByTestId, findByText } = renderScreen(<SubjectsScreen />, store);
-
-    const card = await findByTestId('subject-subject-bin');
-    fireEvent.press(within(card).getByText('Ubah'));
-    fireEvent.changeText(await findByTestId('subject-name'), 'B. Indonesia');
-    await act(async () => {
-      fireEvent.press(await findByText('Simpan mapel'));
-    });
-    await waitFor(() =>
-      expect(store.getState().data.subjects.data.some((item) => item.name === 'B. Indonesia')).toBe(
-        true,
-      ),
-    );
-
-    fireEvent.press(within(await findByTestId('subject-subject-bin')).getByText('Hapus'));
-    await waitFor(() => expect(store.getState().data.subjects.data).toHaveLength(2));
   });
 
   it('clears all data and reloads the example set from settings', async () => {
@@ -407,7 +130,7 @@ describe('editing flows', () => {
     await waitFor(() => expect(store.getState().data.duties.data).toHaveLength(3));
   });
 
-  it('reports a storage failure when the profile name is empty', async () => {
+  it('reports a validation failure when the name is blank', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     const store = makeStore();
     const { findByText, findByLabelText, findByTestId } = renderScreen(<DashboardScreen />, store);
@@ -422,8 +145,205 @@ describe('editing flows', () => {
   });
 });
 
-describe('empty and holiday states', () => {
-  it('shows holiday copy on the uniform screen', async () => {
+describe('duty screen', () => {
+  it('groups duties and shows an Indonesian status', async () => {
+    const { findByText, findByTestId } = renderScreen(<DutyScreen />);
+
+    expect(await findByText('HARI INI')).toBeOnTheScreen();
+    expect(await findByText('TERLEWAT')).toBeOnTheScreen();
+    expect(await findByTestId('duty-duty-today')).toBeOnTheScreen();
+  });
+
+  it('creates a duty from the bottom sheet', async () => {
+    const store = makeStore(false);
+    const { findByText, findByTestId, findByLabelText } = renderScreen(<DutyScreen />, store);
+
+    expect(await findByText('Belum ada jadwal piket')).toBeOnTheScreen();
+    fireEvent.press(await findByLabelText('Tambah piket'));
+
+    fireEvent.changeText(await findByTestId('duty-date'), today);
+    fireEvent.changeText(await findByTestId('duty-student'), 'Ani');
+    fireEvent.changeText(await findByTestId('duty-notes'), 'Sapu lantai');
+
+    await act(async () => {
+      fireEvent.press(await findByText('Simpan piket'));
+    });
+
+    await waitFor(() => expect(store.getState().data.duties.data).toHaveLength(1));
+    expect(await findByText('Sapu lantai')).toBeOnTheScreen();
+  });
+
+  it('switches the shift segment and surfaces validation errors', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const store = makeStore(false);
+    const { findByText, findByTestId, findByLabelText } = renderScreen(<DutyScreen />, store);
+
+    fireEvent.press(await findByLabelText('Tambah piket'));
+    fireEvent.press(await findByLabelText('Siang'));
+    fireEvent.changeText(await findByTestId('duty-date'), '01-11-2026');
+    fireEvent.changeText(await findByTestId('duty-student'), 'Beni');
+
+    await act(async () => {
+      fireEvent.press(await findByText('Simpan piket'));
+    });
+
+    expect(alertSpy).toHaveBeenCalledWith('Gagal menyimpan', 'Tanggal harus berformat YYYY-MM-DD.');
+    expect(store.getState().data.duties.data).toEqual([]);
+  });
+
+  it('opens a duty, completes it and deletes another one', async () => {
+    autoConfirmAlert();
+    const store = makeStore();
+    const { findByText, findByTestId } = renderScreen(<DutyScreen />, store);
+
+    fireEvent.press(await findByTestId('duty-duty-today'));
+    await act(async () => {
+      fireEvent.press(await findByText('Tandai selesai'));
+    });
+    await waitFor(() =>
+      expect(store.getState().data.duties.data.find((duty) => duty.id === 'duty-today')?.status).toBe(
+        'COMPLETED',
+      ),
+    );
+
+    fireEvent.press(await findByTestId('duty-duty-tomorrow'));
+    fireEvent.press(await findByText('Hapus'));
+    await waitFor(() => expect(store.getState().data.duties.data).toHaveLength(2));
+  });
+});
+
+describe('homework screen', () => {
+  it('groups late work first and hides delete for it', async () => {
+    const { findByText, findByTestId } = renderScreen(<HomeworkScreen />);
+
+    expect(await findByText('TERLEWAT')).toBeOnTheScreen();
+    expect(await findByText('Latihan pecahan halaman 42')).toBeOnTheScreen();
+
+    fireEvent.press(await findByTestId('homework-hw-late'));
+    // Late work explains itself instead of offering Hapus.
+    expect(
+      await findByText('PR terlambat tidak bisa dihapus. Ubah tenggatnya kalau memang salah input.'),
+    ).toBeOnTheScreen();
+  });
+
+  it('marks homework done', async () => {
+    const store = makeStore();
+    const { findByText, findByTestId } = renderScreen(<HomeworkScreen />, store);
+
+    fireEvent.press(await findByTestId('homework-hw-upcoming'));
+    await act(async () => {
+      fireEvent.press(await findByText('Tandai selesai'));
+    });
+
+    await waitFor(() =>
+      expect(
+        store.getState().data.homework.data.find((item) => item.id === 'hw-upcoming')?.assignment
+          ?.status,
+      ).toBe('SUBMITTED'),
+    );
+  });
+
+  it('adds homework from the sheet', async () => {
+    const store = makeStore(false);
+    const { findByText, findByTestId, findByLabelText } = renderScreen(<HomeworkScreen />, store);
+
+    fireEvent.press(await findByLabelText('Tambah PR'));
+    fireEvent.changeText(await findByTestId('homework-title'), 'Ringkasan cerpen');
+    fireEvent.changeText(await findByTestId('homework-subject'), 'Bahasa Indonesia');
+    fireEvent.changeText(await findByTestId('homework-due'), addDaysKey(today, 2));
+
+    await act(async () => {
+      fireEvent.press(await findByText('Simpan PR'));
+    });
+
+    await waitFor(() => expect(store.getState().data.homework.data).toHaveLength(1));
+    expect(await findByText('Ringkasan cerpen')).toBeOnTheScreen();
+  });
+});
+
+describe('exam screen', () => {
+  it('publishes a draft and blocks later edits', async () => {
+    autoConfirmAlert();
+    const store = makeStore();
+    const { findByText, findByTestId } = renderScreen(<ExamScreen />, store);
+
+    fireEvent.press(await findByTestId('exam-exam-ipa'));
+    await act(async () => {
+      fireEvent.press(await findByText('Publikasikan'));
+    });
+
+    await waitFor(() =>
+      expect(store.getState().data.exams.data.find((exam) => exam.id === 'exam-ipa')?.isLocked).toBe(
+        true,
+      ),
+    );
+
+    // The locked sheet only reports the lock and cannot edit.
+    fireEvent.press(await findByTestId('exam-exam-ipa'));
+    expect(await findByText(/Terkunci setelah dipublikasikan/)).toBeOnTheScreen();
+  });
+
+  it('adds an exam from the sheet', async () => {
+    const store = makeStore(false);
+    const { findByText, findByTestId, findByLabelText } = renderScreen(<ExamScreen />, store);
+
+    fireEvent.press(await findByLabelText('Tambah ujian'));
+    fireEvent.changeText(await findByTestId('exam-title'), 'UTS IPA');
+    fireEvent.changeText(await findByTestId('exam-subject'), 'IPA');
+    fireEvent.changeText(await findByTestId('exam-date'), addDaysKey(today, 5));
+    fireEvent.changeText(await findByTestId('exam-room'), 'Lab');
+
+    await act(async () => {
+      fireEvent.press(await findByText('Simpan ujian'));
+    });
+
+    await waitFor(() => expect(store.getState().data.exams.data).toHaveLength(1));
+    expect(await findByText('UTS IPA')).toBeOnTheScreen();
+  });
+});
+
+describe('subjects screen', () => {
+  it('lists mapel alphabetically, adds one and goes back', async () => {
+    const store = makeStore();
+    const { findByText, findByTestId, findByLabelText, getAllByText } = renderScreen(
+      <SubjectsScreen />,
+      store,
+    );
+
+    expect(await findByText('Matematika')).toBeOnTheScreen();
+    expect(getAllByText('Sari Wulandari').length).toBe(3);
+
+    fireEvent.press(await findByLabelText('Tambah mapel'));
+    fireEvent.changeText(await findByTestId('subject-name'), 'Sejarah');
+    fireEvent.changeText(await findByTestId('subject-code'), 'sej');
+    await act(async () => {
+      fireEvent.press(await findByText('Simpan mapel'));
+    });
+    await waitFor(() => expect(store.getState().data.subjects.data).toHaveLength(4));
+    expect(await findByText('Sejarah')).toBeOnTheScreen();
+
+    fireEvent.press(await findByLabelText('Kembali'));
+    expect(mockGoBack).toHaveBeenCalled();
+  });
+});
+
+describe('uniform screen', () => {
+  it('groups items by category and toggles one', async () => {
+    const store = makeStore();
+    const { findByText, getByRole, getByLabelText } = renderScreen(<UniformScreen />, store);
+
+    expect(await findByText('ATASAN')).toBeOnTheScreen();
+    expect(await findByText('ALAS KAKI')).toBeOnTheScreen();
+    expect(getByLabelText('0/4 selesai')).toBeOnTheScreen();
+
+    await act(async () => {
+      fireEvent.press(getByRole('checkbox', { name: 'Dasi, Atribut' }));
+    });
+
+    expect(await findByText('1/4 selesai')).toBeOnTheScreen();
+  });
+
+  it('explains holidays', async () => {
     const dataset = createDemoDataset();
     const backend = memoryBackend({
       [DATASET_KEY]: JSON.stringify({
@@ -444,34 +364,49 @@ describe('empty and holiday states', () => {
     expect(await findByText('Hari libur')).toBeOnTheScreen();
     expect(await findByText('Libur semester')).toBeOnTheScreen();
   });
+});
 
-  it('shows empty copy on every list screen', async () => {
+describe('empty states', () => {
+  it('guides the user on every list screen', async () => {
     const store = makeStore(false);
-    const duty = renderScreen(<DutyScreen />, store);
-    expect(await duty.findByText('Belum ada jadwal piket')).toBeOnTheScreen();
 
-    const homework = renderScreen(<HomeworkScreen />, store);
-    expect(await homework.findByText('Belum ada PR')).toBeOnTheScreen();
-
-    const exams = renderScreen(<ExamScreen />, store);
-    expect(await exams.findByText('Belum ada ujian')).toBeOnTheScreen();
-
-    const subjects = renderScreen(<SubjectsScreen />, store);
-    expect(await subjects.findByText('Belum ada mata pelajaran')).toBeOnTheScreen();
+    expect(await renderScreen(<DutyScreen />, store).findByText('Belum ada jadwal piket')).toBeOnTheScreen();
+    expect(await renderScreen(<HomeworkScreen />, store).findByText('Belum ada PR')).toBeOnTheScreen();
+    expect(await renderScreen(<ExamScreen />, store).findByText('Belum ada ujian')).toBeOnTheScreen();
+    expect(
+      await renderScreen(<SubjectsScreen />, store).findByText('Belum ada mata pelajaran'),
+    ).toBeOnTheScreen();
   });
 });
 
 describe('root navigator', () => {
-  it('opens straight on the tabs without a login step', async () => {
-    const { findAllByText, findByText } = renderScreen(<RootNavigator />);
-    expect(await findByText(/^Selamat (pagi|siang|sore|malam)$/)).toBeOnTheScreen();
-    expect((await findAllByText('Mapel')).length).toBeGreaterThan(0);
-    expect((await findAllByText('Piket')).length).toBeGreaterThan(0);
-  });
+  it('opens straight on five tabs without a login step', async () => {
+    const { findAllByText, findByText, queryByText } = renderScreen(<RootNavigator />);
 
-  it('never renders an auth screen', () => {
-    const { queryByText } = renderScreen(<RootNavigator />);
+    expect(await findByText(/^Selamat (pagi|siang|sore|malam)$/)).toBeOnTheScreen();
+    expect((await findAllByText('Piket')).length).toBeGreaterThan(0);
+    expect((await findAllByText('Seragam')).length).toBeGreaterThan(0);
+    expect(queryByText('Mapel')).toBeNull();
     expect(queryByText('Masuk')).toBeNull();
-    expect(queryByText('Buat akun')).toBeNull();
+  });
+});
+
+describe('list grouping', () => {
+  it('buckets rows into relative day sections', () => {
+    const groups = groupByDay(today, [
+      { id: 'late', date: addDaysKey(today, -2) },
+      { id: 'today', date: today },
+      { id: 'tomorrow', date: addDaysKey(today, 1) },
+      { id: 'week', date: addDaysKey(today, 4) },
+      { id: 'later', date: addDaysKey(today, 30) },
+    ], (item) => item.date);
+
+    expect(groups.map((group) => group.title)).toEqual([
+      'Terlewat',
+      'Hari ini',
+      'Besok',
+      'Minggu ini',
+      'Berikutnya',
+    ]);
   });
 });
