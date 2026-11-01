@@ -42,6 +42,7 @@ export function ExamScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm());
+  const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(() => {
     void dispatch(refreshAll());
@@ -71,11 +72,15 @@ export function ExamScreen() {
   };
 
   const submit = async () => {
+    if (saving) return;
+    setSaving(true);
     try {
       await dispatch(saveExam({ input: form, id: editingId ?? undefined })).unwrap();
       setSheetOpen(false);
     } catch (failure) {
       Alert.alert('Gagal menyimpan', errorMessage(failure));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -90,10 +95,20 @@ export function ExamScreen() {
         {
           text: 'Publikasikan',
           onPress: () => {
-            dispatch(publishExam(id))
-              .unwrap()
-              .then(() => setSheetOpen(false))
-              .catch((failure) => Alert.alert('Gagal mempublikasikan', errorMessage(failure)));
+            void (async () => {
+              setSaving(true);
+              try {
+                // Save the visible fields first: publishing must lock what the
+                // student just typed, not the previous stored version.
+                await dispatch(saveExam({ input: form, id })).unwrap();
+                await dispatch(publishExam(id)).unwrap();
+                setSheetOpen(false);
+              } catch (failure) {
+                Alert.alert('Gagal mempublikasikan', errorMessage(failure));
+              } finally {
+                setSaving(false);
+              }
+            })();
           },
         },
       ],
@@ -171,10 +186,10 @@ export function ExamScreen() {
             <PrimaryButton label="Tutup" tone="ghost" onPress={() => setSheetOpen(false)} />
           ) : (
             <>
-              <PrimaryButton label="Simpan ujian" onPress={() => void submit()} />
+              <PrimaryButton label="Simpan ujian" loading={saving} onPress={() => void submit()} />
               {editingId ? (
                 <>
-                  <PrimaryButton label="Publikasikan" tone="ghost" onPress={publish} />
+                  <PrimaryButton label="Publikasikan" tone="ghost" loading={saving} onPress={publish} />
                   <PrimaryButton label="Hapus" tone="ghost" onPress={remove} />
                 </>
               ) : null}

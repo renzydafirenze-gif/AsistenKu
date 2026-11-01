@@ -113,6 +113,30 @@ describe('offline storage', () => {
     expect((await storage.load()).duties).toEqual([]);
   });
 
+  it('rejects payloads that do not look like a dataset', async () => {
+    const backend = memoryBackend();
+    await backend.setItem(DATASET_KEY, JSON.stringify({ user: { fullName: 'Ani' } }));
+
+    const dataset = await createOfflineStorage(backend).load();
+    expect(dataset.duties).toEqual([]);
+    expect(dataset.uniform.total).toBe(4);
+  });
+
+  it('rolls the day over even when the dataset is already cached', async () => {
+    const storage = createOfflineStorage(memoryBackend());
+    const first = await storage.load();
+
+    // Simulate the app staying open past midnight: write yesterday's ticks.
+    await storage.save({
+      ...first,
+      uniform: demoUniform(addDaysKey(formatDateKey(new Date()), -1), ['shirt']),
+    });
+
+    const reloaded = await storage.load();
+    expect(reloaded.uniform.date).toBe(formatDateKey(new Date()));
+    expect(reloaded.uniform.completedCount).toBe(0);
+  });
+
   it('resets the uniform checklist when the stored day is old', async () => {
     const backend = memoryBackend();
     const seeded = createEmptyDataset(NOW);
@@ -156,6 +180,19 @@ describe('duty CRUD', () => {
     await expect(repository.saveDuty({ ...dutyInput(), date: '01-11-2026' })).rejects.toThrow(
       'Tanggal harus berformat YYYY-MM-DD.',
     );
+    await expect(repository.saveDuty({ ...dutyInput(), date: '2026-02-31' })).rejects.toThrow(
+      'Tanggal bukan tanggal yang valid.',
+    );
+  });
+
+  it('clears the completion mark when a finished duty is rescheduled', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    const duty = await repository.saveDuty(dutyInput());
+    await repository.completeDuty(duty.id);
+
+    const moved = await repository.saveDuty(dutyInput(addDaysKey(TODAY, 2)), duty.id);
+    expect(moved.completedAt).toBeNull();
+    expect(moved.status).toBe('UPCOMING');
   });
 });
 
@@ -229,7 +266,13 @@ describe('exam CRUD', () => {
     expect((await repository.exams()).items).toEqual([]);
 
     await expect(repository.saveExam({ ...input, startTime: '7:30' })).rejects.toThrow(
-      'Jam harus berformat HH:MM.',
+      'Jam mulai harus berformat HH:MM.',
+    );
+    await expect(repository.saveExam({ ...input, startTime: '25:00' })).rejects.toThrow(
+      'Jam mulai harus berformat HH:MM.',
+    );
+    await expect(repository.saveExam({ ...input, startTime: '10:00', endTime: '09:00' })).rejects.toThrow(
+      'Jam selesai harus setelah jam mulai.',
     );
   });
 });

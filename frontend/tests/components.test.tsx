@@ -3,6 +3,7 @@ import { render, fireEvent } from '@testing-library/react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
 import { ChecklistRow } from '../src/components/ChecklistRow';
+import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { EmptyState } from '../src/components/EmptyState';
 import { Fab } from '../src/components/Fab';
 import { ListRow } from '../src/components/ListRow';
@@ -177,6 +178,22 @@ describe('components', () => {
     const { getByRole } = wrap(<ChecklistRow label="Dasi" checked disabled onToggle={onToggle} />);
     fireEvent.press(getByRole('checkbox'));
     expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it('keeps a recoverable screen when a child crashes', () => {
+    // React logs caught render errors; the boundary is what we assert on.
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const Boom = () => {
+      throw new Error('boom');
+    };
+    const { getByText, getByLabelText } = wrap(
+      <ErrorBoundary>
+        <Boom />
+      </ErrorBoundary>,
+    );
+
+    expect(getByText('Aplikasi berhenti sebentar')).toBeOnTheScreen();
+    fireEvent.press(getByLabelText('Coba lagi'));
   });
 
   it('disables the primary button while loading and keeps a 48dp target', () => {

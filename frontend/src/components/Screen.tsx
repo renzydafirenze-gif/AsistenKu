@@ -86,7 +86,8 @@ export function Screen({
         <ScrollView
           contentContainerStyle={[
             styles.content,
-            { paddingBottom: insets.bottom + theme.spacing(16) },
+            // Extra room so a FAB never covers the last row.
+            { paddingBottom: insets.bottom + theme.spacing(floating ? 24 : 8) },
           ]}
           keyboardShouldPersistTaps="handled"
           refreshControl={

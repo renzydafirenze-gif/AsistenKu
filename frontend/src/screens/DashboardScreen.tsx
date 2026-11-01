@@ -44,6 +44,7 @@ export function DashboardScreen() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(() => {
     void dispatch(refreshAll());
@@ -59,11 +60,15 @@ export function DashboardScreen() {
   };
 
   const saveName = async () => {
+    if (saving) return;
+    setSaving(true);
     try {
       await dispatch(updateProfile(nameDraft)).unwrap();
       setSettingsOpen(false);
     } catch (failure) {
       Alert.alert('Gagal menyimpan', errorMessage(failure));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -179,7 +184,13 @@ export function DashboardScreen() {
         <StatTile
           testID="stat-exam"
           label="Ujian"
-          value={nextExam ? `H-${Math.max(nextExam.daysUntil ?? 0, 0)}` : '—'}
+          value={
+            nextExam
+              ? (nextExam.daysUntil ?? 0) <= 0
+                ? 'Hari ini'
+                : `H-${nextExam.daysUntil}`
+              : '—'
+          }
           hint={nextExam?.subject?.name ?? 'belum ada'}
           tone={theme.colors.secondary}
           onPress={() => navigation.navigate('Exam')}
@@ -239,7 +250,7 @@ export function DashboardScreen() {
         visible={settingsOpen}
         title="Pengaturan"
         onClose={() => setSettingsOpen(false)}
-        footer={<PrimaryButton label="Simpan nama" onPress={() => void saveName()} />}
+        footer={<PrimaryButton label="Simpan nama" loading={saving} onPress={() => void saveName()} />}
       >
         <TextField
           label="Nama siswa"

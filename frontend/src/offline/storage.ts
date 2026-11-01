@@ -12,6 +12,25 @@ function rollUniformToToday(dataset: OfflineDataset): OfflineDataset {
   return { ...dataset, uniform: demoUniform(today) };
 }
 
+/**
+ * Guards against a half-written or older payload: a dataset without the
+ * expected arrays would crash the first screen that maps over it.
+ */
+function isDataset(value: unknown): value is OfflineDataset {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<OfflineDataset>;
+  return (
+    !!candidate.user &&
+    typeof candidate.user.fullName === 'string' &&
+    Array.isArray(candidate.duties) &&
+    Array.isArray(candidate.homework) &&
+    Array.isArray(candidate.exams) &&
+    Array.isArray(candidate.subjects) &&
+    !!candidate.uniform &&
+    Array.isArray(candidate.uniform.items)
+  );
+}
+
 type Backend = Pick<typeof AsyncStorage, 'getItem' | 'setItem' | 'removeItem'>;
 
 export interface OfflineStorage {
@@ -24,29 +43,39 @@ export interface OfflineStorage {
 export function createOfflineStorage(backend: Backend = AsyncStorage): OfflineStorage {
   let cache: OfflineDataset | null = null;
 
+  const persist = async (dataset: OfflineDataset) => {
+    cache = dataset;
+    await backend.setItem(DATASET_KEY, JSON.stringify(dataset));
+  };
+
   return {
     load: async () => {
-      if (cache) return cache;
+      if (cache) {
+        // The app can stay open past midnight; roll the day over on read.
+        const rolled = rollUniformToToday(cache);
+        if (rolled !== cache) await persist(rolled);
+        return rolled;
+      }
       const raw = await backend.getItem(DATASET_KEY);
       if (raw) {
         try {
-          const parsed = JSON.parse(raw) as OfflineDataset;
-          cache = rollUniformToToday(parsed);
-          if (cache !== parsed) {
-            await backend.setItem(DATASET_KEY, JSON.stringify(cache));
+          const parsed: unknown = JSON.parse(raw);
+          if (isDataset(parsed)) {
+            const rolled = rollUniformToToday(parsed);
+            await persist(rolled);
+            return rolled;
           }
-          return cache;
         } catch {
-          await backend.removeItem(DATASET_KEY);
+          // Fall through to a fresh dataset below.
         }
+        await backend.removeItem(DATASET_KEY);
       }
-      cache = createEmptyDataset();
-      await backend.setItem(DATASET_KEY, JSON.stringify(cache));
-      return cache;
+      const empty = createEmptyDataset();
+      await persist(empty);
+      return empty;
     },
     save: async (dataset) => {
-      cache = dataset;
-      await backend.setItem(DATASET_KEY, JSON.stringify(dataset));
+      await persist(dataset);
     },
     reset: async () => {
       cache = null;

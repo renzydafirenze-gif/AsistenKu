@@ -153,7 +153,7 @@ const dataSlice = createSlice({
         (
           ['dashboard', 'duties', 'homework', 'exams', 'subjects', 'uniform'] as const
         ).forEach((key) => {
-          state[key].status = state[key].data ? 'ready' : 'loading';
+          state[key].status = 'loading';
         });
       })
       .addCase(refreshAll.fulfilled, (state, action) => {

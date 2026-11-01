@@ -197,6 +197,7 @@ describe('duty screen', () => {
     const { findByText, findByTestId } = renderScreen(<DutyScreen />, store);
 
     fireEvent.press(await findByTestId('duty-duty-today'));
+    fireEvent.changeText(await findByTestId('duty-notes'), 'Sapu, pel, rapikan meja');
     await act(async () => {
       fireEvent.press(await findByText('Tandai selesai'));
     });
@@ -204,6 +205,10 @@ describe('duty screen', () => {
       expect(store.getState().data.duties.data.find((duty) => duty.id === 'duty-today')?.status).toBe(
         'COMPLETED',
       ),
+    );
+    // Completing saves the edited notes first.
+    expect(store.getState().data.duties.data.find((duty) => duty.id === 'duty-today')?.notes).toBe(
+      'Sapu, pel, rapikan meja',
     );
 
     fireEvent.press(await findByTestId('duty-duty-tomorrow'));
@@ -268,6 +273,7 @@ describe('exam screen', () => {
     const { findByText, findByTestId } = renderScreen(<ExamScreen />, store);
 
     fireEvent.press(await findByTestId('exam-exam-ipa'));
+    fireEvent.changeText(await findByTestId('exam-room'), 'Lab X');
     await act(async () => {
       fireEvent.press(await findByText('Publikasikan'));
     });
@@ -276,6 +282,10 @@ describe('exam screen', () => {
       expect(store.getState().data.exams.data.find((exam) => exam.id === 'exam-ipa')?.isLocked).toBe(
         true,
       ),
+    );
+    // Publishing locks the edited fields, not the previous stored version.
+    expect(store.getState().data.exams.data.find((exam) => exam.id === 'exam-ipa')?.room).toBe(
+      'Lab X',
     );
 
     // The locked sheet only reports the lock and cannot edit.

@@ -101,6 +101,23 @@ Tokens live in `src/theme/tokens.ts` (one accent, semantic status colours, six
 type steps, hairline borders, no shadows — elevation in dark mode comes from
 surface colour).
 
+### Reliability
+
+Hardening added after the first real-device pass:
+
+- **Input validation in the repository**, not just the form: real calendar
+  dates (2026-02-31 is rejected), 24h `HH:MM` ranges, exam end after start.
+- **Storage shape guard**: a corrupt or older payload is discarded instead of
+  crashing the first screen that maps over it.
+- **Midnight rollover** happens on every read, including the in-memory cache, so
+  an app left open overnight gets today's checklist and statuses.
+- **Resume refresh**: returning to the foreground dispatches `refreshAll`, so
+  dates and greetings are never yesterday's.
+- **Double-submit guard**: save/complete/publish buttons show a spinner and
+  ignore taps while a mutation is in flight.
+- **Error boundary** around the navigator: a render crash offers "Coba lagi"
+  instead of a white screen; data on disk is untouched.
+
 ### Accessibility
 
 - Every interactive element has a role, label and state (`checkbox`, `button`,
@@ -120,7 +137,7 @@ surface colour).
 ## Testing
 
 ```bash
-npm test                  # 77 tests, 6 suites
+npm test                  # 81 tests, 6 suites
 npm run test:coverage     # gate: statements 80, branches 70, functions 80, lines 80
 ```
 

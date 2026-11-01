@@ -48,6 +48,7 @@ export function DutyScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm());
+  const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(() => {
     void dispatch(refreshAll());
@@ -75,11 +76,15 @@ export function DutyScreen() {
   };
 
   const submit = async () => {
+    if (saving) return;
+    setSaving(true);
     try {
       await dispatch(saveDuty({ input: form, id: editingId ?? undefined })).unwrap();
       setSheetOpen(false);
     } catch (failure) {
       Alert.alert('Gagal menyimpan', errorMessage(failure));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -101,13 +106,19 @@ export function DutyScreen() {
     ]);
   };
 
-  const complete = () => {
-    if (!editingId) return;
-    const id = editingId;
-    dispatch(completeDuty(id))
-      .unwrap()
-      .then(() => setSheetOpen(false))
-      .catch((failure) => Alert.alert('Gagal menyimpan', errorMessage(failure)));
+  const complete = async () => {
+    if (!editingId || saving) return;
+    setSaving(true);
+    try {
+      // Persist any edits before marking it done, so notes are not lost.
+      await dispatch(saveDuty({ input: form, id: editingId })).unwrap();
+      await dispatch(completeDuty(editingId)).unwrap();
+      setSheetOpen(false);
+    } catch (failure) {
+      Alert.alert('Gagal menyimpan', errorMessage(failure));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const editing = editingId ? data.find((duty) => duty.id === editingId) : undefined;
@@ -162,7 +173,7 @@ export function DutyScreen() {
         onClose={() => setSheetOpen(false)}
         footer={
           <>
-            <PrimaryButton label="Simpan piket" onPress={() => void submit()} />
+            <PrimaryButton label="Simpan piket" loading={saving} onPress={() => void submit()} />
             {editingId ? (
               <PrimaryButton label="Hapus" tone="ghost" onPress={remove} />
             ) : null}
@@ -198,7 +209,7 @@ export function DutyScreen() {
           testID="duty-notes"
         />
         {editing?.canComplete ? (
-          <PrimaryButton label="Tandai selesai" tone="ghost" onPress={complete} />
+          <PrimaryButton label="Tandai selesai" tone="ghost" loading={saving} onPress={() => void complete()} />
         ) : null}
       </Sheet>
     </Screen>

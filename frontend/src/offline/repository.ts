@@ -49,7 +49,7 @@ export interface SubjectInput {
 }
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
-const TIME = /^\d{2}:\d{2}$/;
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 function newId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -64,6 +64,22 @@ function requireText(value: string, label: string): string {
 function requireDate(value: string, label: string): string {
   const trimmed = value.trim();
   if (!DATE_KEY.test(trimmed)) throw new Error(`${label} harus berformat YYYY-MM-DD.`);
+  // Reject impossible calendar days such as 2026-02-31.
+  const [year, month, day] = trimmed.split('-').map(Number) as [number, number, number];
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    throw new Error(`${label} bukan tanggal yang valid.`);
+  }
+  return trimmed;
+}
+
+function requireTime(value: string, label: string): string {
+  const trimmed = value.trim();
+  if (!TIME.test(trimmed)) throw new Error(`${label} harus berformat HH:MM.`);
   return trimmed;
 }
 
@@ -129,6 +145,8 @@ export function createRepository(storage: OfflineStorage): Repository {
       const studentName = requireText(input.studentName, 'Nama siswa');
       const existing = id ? dataset.duties.find((item) => item.id === id) : undefined;
       if (id && !existing) throw new Error('Jadwal piket tidak ditemukan.');
+      // A rescheduled duty is not done yet; otherwise it would stay COMPLETED.
+      const rescheduled = !!existing && existing.date !== date;
 
       const duty: Duty = {
         id: existing?.id ?? newId('duty'),
@@ -139,7 +157,7 @@ export function createRepository(storage: OfflineStorage): Repository {
         assignedStudentId: existing?.assignedStudentId ?? 'local-user',
         assignedStudentName: studentName,
         notes: input.notes.trim() || null,
-        completedAt: existing?.completedAt ?? null,
+        completedAt: rescheduled ? null : (existing?.completedAt ?? null),
       };
       await storage.save({
         ...dataset,
@@ -230,9 +248,9 @@ export function createRepository(storage: OfflineStorage): Repository {
       const dataset = await load();
       const title = requireText(input.title, 'Judul ujian');
       const examDate = requireDate(input.examDate, 'Tanggal ujian');
-      if (!TIME.test(input.startTime) || !TIME.test(input.endTime)) {
-        throw new Error('Jam harus berformat HH:MM.');
-      }
+      const startTime = requireTime(input.startTime, 'Jam mulai');
+      const endTime = requireTime(input.endTime, 'Jam selesai');
+      if (endTime <= startTime) throw new Error('Jam selesai harus setelah jam mulai.');
       const existing = id ? dataset.exams.find((item) => item.id === id) : undefined;
       if (existing?.isLocked) throw new Error('Ujian terpublikasi tidak bisa diubah.');
       if (id && !existing) throw new Error('Ujian tidak ditemukan.');
@@ -241,8 +259,8 @@ export function createRepository(storage: OfflineStorage): Repository {
         id: existing?.id ?? newId('exam'),
         title,
         examDate,
-        startTime: input.startTime,
-        endTime: input.endTime,
+        startTime,
+        endTime,
         room: input.room.trim() || null,
         subject: subjectRef(input.subjectName),
         isPublished: false,

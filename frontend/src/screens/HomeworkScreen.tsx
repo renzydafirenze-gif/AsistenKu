@@ -38,6 +38,7 @@ export function HomeworkScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm());
+  const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(() => {
     void dispatch(refreshAll());
@@ -65,11 +66,15 @@ export function HomeworkScreen() {
   };
 
   const submit = async () => {
+    if (saving) return;
+    setSaving(true);
     try {
       await dispatch(saveHomework({ input: form, id: editingId ?? undefined })).unwrap();
       setSheetOpen(false);
     } catch (failure) {
       Alert.alert('Gagal menyimpan', errorMessage(failure));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -91,13 +96,18 @@ export function HomeworkScreen() {
     ]);
   };
 
-  const complete = () => {
-    if (!editingId) return;
-    const id = editingId;
-    dispatch(completeHomework(id))
-      .unwrap()
-      .then(() => setSheetOpen(false))
-      .catch((failure) => Alert.alert('Gagal menyimpan', errorMessage(failure)));
+  const complete = async () => {
+    if (!editingId || saving) return;
+    setSaving(true);
+    try {
+      await dispatch(saveHomework({ input: form, id: editingId })).unwrap();
+      await dispatch(completeHomework(editingId)).unwrap();
+      setSheetOpen(false);
+    } catch (failure) {
+      Alert.alert('Gagal menyimpan', errorMessage(failure));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const editing = editingId ? data.find((item) => item.id === editingId) : undefined;
@@ -158,7 +168,7 @@ export function HomeworkScreen() {
         onClose={() => setSheetOpen(false)}
         footer={
           <>
-            <PrimaryButton label="Simpan PR" onPress={() => void submit()} />
+            <PrimaryButton label="Simpan PR" loading={saving} onPress={() => void submit()} />
             {editing && !editing.isLate ? (
               <PrimaryButton label="Hapus" tone="ghost" onPress={remove} />
             ) : null}
@@ -200,7 +210,7 @@ export function HomeworkScreen() {
           testID="homework-description"
         />
         {editing && editing.assignment?.status !== 'SUBMITTED' ? (
-          <PrimaryButton label="Tandai selesai" tone="ghost" onPress={complete} />
+          <PrimaryButton label="Tandai selesai" tone="ghost" loading={saving} onPress={() => void complete()} />
         ) : null}
       </Sheet>
     </Screen>

@@ -32,6 +32,7 @@ export function SubjectsScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm());
+  const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(() => {
     void dispatch(refreshAll());
@@ -59,11 +60,15 @@ export function SubjectsScreen() {
   };
 
   const submit = async () => {
+    if (saving) return;
+    setSaving(true);
     try {
       await dispatch(saveSubject({ input: form, id: editingId ?? undefined })).unwrap();
       setSheetOpen(false);
     } catch (failure) {
       Alert.alert('Gagal menyimpan', errorMessage(failure));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -137,7 +142,7 @@ export function SubjectsScreen() {
         onClose={() => setSheetOpen(false)}
         footer={
           <>
-            <PrimaryButton label="Simpan mapel" onPress={() => void submit()} />
+            <PrimaryButton label="Simpan mapel" loading={saving} onPress={() => void submit()} />
             {editingId ? <PrimaryButton label="Hapus" tone="ghost" onPress={remove} /> : null}
           </>
         }
