@@ -53,8 +53,10 @@ always looks current). `storage.ts` seeds AsyncStorage once and persists
 mutations, rolling the uniform checklist over at midnight; `repository.ts` is
 the only data source — no fetch, no server.
 
-Completing a duty or ticking a uniform item writes straight to the device store
-and survives restarts. "Reset data contoh" on the dashboard restores the seed.
+Completing a duty, submitting homework or ticking a uniform item writes straight
+to the device store and survives restarts; the dashboard reloads so its cards
+never show stale counts. "Reset data contoh" on the dashboard restores the seed.
+Late homework keeps its red status after submission and cannot be deleted.
 `android.blockedPermissions` removes INTERNET, so the APK cannot reach a network
 even by accident.
 
@@ -85,7 +87,7 @@ red. Colour is never the only signal — every card carries a text badge.
 ## Testing
 
 ```bash
-npm test                  # 56 tests, 6 suites
+npm test                  # 60 tests, 6 suites
 npm run test:coverage     # gate: statements 80, branches 70, functions 80, lines 80
 ```
 

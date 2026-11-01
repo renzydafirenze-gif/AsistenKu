@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Provider } from 'react-redux';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
@@ -97,12 +97,18 @@ describe('duty screen', () => {
     const { findByText, findAllByText } = renderScreen(<DutyScreen />, store);
 
     expect(await findByText('Tandai selesai')).toBeOnTheScreen();
-    fireEvent.press(await findByText('Tandai selesai'));
+    // Indonesian status labels, no raw enum leak.
+    expect(await findByText('Hari ini')).toBeOnTheScreen();
+    await act(async () => {
+      fireEvent.press(await findByText('Tandai selesai'));
+    });
 
     await waitFor(() => {
       const duty = store.getState().data.duties.data.find((item) => item.status === 'COMPLETED');
       expect(duty).toBeTruthy();
     });
+    // The screen also refreshes the dashboard card; wait for that dispatch.
+    await waitFor(() => expect(store.getState().data.dashboard.status).toBe('ready'));
     expect((await findAllByText('Selesai')).length).toBeGreaterThan(0);
   });
 
@@ -125,6 +131,26 @@ describe('homework screen', () => {
     const { findAllByText, findByText } = renderScreen(<HomeworkScreen />);
     expect(await findByText('Latihan pecahan halaman 42')).toBeOnTheScreen();
     expect((await findAllByText('Terlambat')).length).toBeGreaterThan(0);
+  });
+
+  it('marks a task done and keeps late work flagged', async () => {
+    const store = makeStore();
+    const { findAllByText, findByText } = renderScreen(<HomeworkScreen />, store);
+
+    // Late task is sorted first; completing it keeps the red status.
+    const [firstButton] = await findAllByText('Tandai selesai');
+    await act(async () => {
+      fireEvent.press(firstButton!);
+    });
+
+    await waitFor(() => {
+      const submitted = store.getState().data.homework.data.filter(
+        (item) => item.assignment?.status === 'SUBMITTED',
+      );
+      expect(submitted).toHaveLength(1);
+    });
+    expect(await findByText('Dikumpulkan terlambat')).toBeOnTheScreen();
+    await waitFor(() => expect(store.getState().data.dashboard.status).toBe('ready'));
   });
 });
 
@@ -154,12 +180,15 @@ describe('uniform screen', () => {
     const { findByText, getByRole } = renderScreen(<UniformScreen />, store);
 
     expect(await findByText('Kemeja putih')).toBeOnTheScreen();
-    fireEvent.press(getByRole('checkbox', { name: 'Dasi, Atribut' }));
+    await act(async () => {
+      fireEvent.press(getByRole('checkbox', { name: 'Dasi, Atribut' }));
+    });
 
     expect(await findByText('1/4 item selesai')).toBeOnTheScreen();
     expect(store.getState().data.uniform.data?.items.find((item) => item.key === 'tie')?.checked).toBe(
       true,
     );
+    await waitFor(() => expect(store.getState().data.dashboard.status).toBe('ready'));
   });
 
   it('explains holidays', async () => {

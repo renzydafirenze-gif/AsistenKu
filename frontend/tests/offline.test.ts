@@ -138,6 +138,25 @@ describe('local repository', () => {
     expect(second.items.find((item) => item.key === 'shirt')?.checked).toBe(true);
   });
 
+  it('submits homework and keeps it in the list', async () => {
+    const backend = memoryBackend();
+    const storage = createOfflineStorage(backend);
+    const repository = createRepository(storage);
+    const { items } = await repository.homework();
+    const late = items.find((item) => item.isLate)!;
+
+    const submitted = await repository.completeHomework(late.id);
+    expect(submitted.assignment?.status).toBe('SUBMITTED');
+
+    const reloaded = await createOfflineStorage(backend).load();
+    expect(reloaded.homework.find((item) => item.id === late.id)?.assignment?.status).toBe('SUBMITTED');
+  });
+
+  it('rejects an unknown homework id', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    await expect(repository.completeHomework('missing')).rejects.toThrow('PR tidak ditemukan.');
+  });
+
   it('re-seeds everything on reset', async () => {
     const storage = createOfflineStorage(memoryBackend());
     const repository = createRepository(storage);

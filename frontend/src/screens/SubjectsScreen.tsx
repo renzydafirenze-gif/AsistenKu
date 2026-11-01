@@ -35,7 +35,7 @@ export function SubjectsScreen() {
       ) : null}
 
       {status !== 'loading' && data.length === 0 ? (
-        <EmptyState title="Belum ada mata pelajaran" hint="Tarik ke bawah untuk mencoba lagi." />
+        <EmptyState title="Belum ada mata pelajaran" hint="Data contoh belum memuat mapel." />
       ) : null}
 
       {data.map((subject) => (

@@ -25,6 +25,7 @@ export interface Repository {
     toast: { type: 'success' | 'info'; message: string };
   }>;
   homework(): Promise<Page<Homework>>;
+  completeHomework(id: string): Promise<Homework>;
   exams(): Promise<Page<Exam>>;
   subjects(): Promise<Page<Subject>>;
   uniformChecklist(date?: string): Promise<UniformChecklist>;
@@ -64,7 +65,22 @@ export function createRepository(storage: OfflineStorage): Repository {
       return { duty: completed, toast: { type: 'success' as const, message: 'Piket ditandai selesai.' } };
     },
 
-    homework: async () => ({ items: (await storage.load()).homework }),
+    homework: async () => {
+      const dataset = await storage.load();
+      return { items: [...dataset.homework].sort((a, b) => a.dueDate.localeCompare(b.dueDate)) };
+    },
+
+    completeHomework: async (id) => {
+      const dataset = await storage.load();
+      const homework = dataset.homework.find((item) => item.id === id);
+      if (!homework) throw new Error('PR tidak ditemukan.');
+      const submitted: Homework = { ...homework, assignment: { status: 'SUBMITTED' } };
+      await storage.save({
+        ...dataset,
+        homework: dataset.homework.map((item) => (item.id === id ? submitted : item)),
+      });
+      return submitted;
+    },
 
     exams: async () => {
       const dataset = await storage.load();

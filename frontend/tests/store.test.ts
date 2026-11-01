@@ -3,6 +3,7 @@ import { createDemoDataset } from '../src/offline/seed';
 import { createStore } from '../src/store';
 import {
   completeDuty,
+  completeHomework,
   loadDashboard,
   loadDuties,
   loadExams,
@@ -113,6 +114,18 @@ describe('data slice (local)', () => {
 
     expect(store.getState().data.duties.data).toHaveLength(0);
     expect(store.getState().data.duties.status).toBe('idle');
+  });
+
+  it('marks homework submitted in place', async () => {
+    const store = makeStore();
+    await store.dispatch(loadHomework());
+    const first = store.getState().data.homework.data[0]!;
+
+    await store.dispatch(completeHomework(first.id));
+
+    const updated = store.getState().data.homework.data.find((item) => item.id === first.id);
+    expect(updated?.assignment?.status).toBe('SUBMITTED');
+    expect(store.getState().data.homework.data).toHaveLength(3);
   });
 
   it('reloads the seed after a dataset reset', async () => {

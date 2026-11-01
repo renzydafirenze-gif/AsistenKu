@@ -51,6 +51,11 @@ export const loadHomework = createAsyncThunk<Homework[], void, { extra: DataDeps
   async (_arg, { extra }) => (await extra.repository.homework()).items,
 );
 
+export const completeHomework = createAsyncThunk<Homework, string, { extra: DataDeps }>(
+  'data/completeHomework',
+  async (id, { extra }) => extra.repository.completeHomework(id),
+);
+
 export const loadExams = createAsyncThunk<Exam[], void, { extra: DataDeps }>(
   'data/exams',
   async (_arg, { extra }) => (await extra.repository.exams()).items,
@@ -130,6 +135,13 @@ const dataSlice = createSlice({
           status: 'error',
           error: describe(action.error),
         };
+      })
+      .addCase(completeHomework.fulfilled, (state, action) => {
+        const index = state.homework.data.findIndex((item) => item.id === action.payload.id);
+        if (index >= 0) state.homework.data[index] = action.payload;
+      })
+      .addCase(completeHomework.rejected, (state, action) => {
+        state.homework.error = describe(action.error);
       })
       .addCase(loadExams.fulfilled, (state, action) => {
         state.exams = { data: action.payload, status: 'ready', error: null };

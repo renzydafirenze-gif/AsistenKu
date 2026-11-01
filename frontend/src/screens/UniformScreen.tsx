@@ -6,7 +6,7 @@ import { EmptyState } from '../components/EmptyState';
 import { Screen } from '../components/Screen';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAppDispatch, useAppSelector } from '../store';
-import { loadUniform, toggleUniform } from '../store/dataSlice';
+import { loadDashboard, loadUniform, toggleUniform } from '../store/dataSlice';
 import { useTheme } from '../theme/ThemeProvider';
 import { formatDateKey, formatIndonesianDay } from '../utils/format';
 
@@ -70,9 +70,11 @@ export function UniformScreen() {
               category={item.category}
               checked={item.checked}
               disabled={status === 'loading'}
-              onToggle={(checked) =>
-                void dispatch(toggleUniform({ date: data.date, itemKey: item.key, checked }))
-              }
+              onToggle={async (checked) => {
+                await dispatch(toggleUniform({ date: data.date, itemKey: item.key, checked }));
+                // Keep the dashboard progress card in step with this checklist.
+                void dispatch(loadDashboard());
+              }}
             />
           ))
         : null}

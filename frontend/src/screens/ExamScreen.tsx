@@ -38,7 +38,7 @@ export function ExamScreen() {
       ) : null}
 
       {status !== 'loading' && data.length === 0 ? (
-        <EmptyState title="Belum ada ujian" hint="Guru akan mempublikasikan jadwal di sini." />
+        <EmptyState title="Belum ada ujian" hint="Jadwal ujian muncul di sini setelah dipublikasikan." />
       ) : null}
 
       {data.map((exam) => {
