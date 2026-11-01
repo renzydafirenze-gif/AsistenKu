@@ -1,0 +1,37 @@
+# Local development stack (Postgres 15 + API). Production runs on EKS with a
+# real secret store and a TLS-terminating ingress, so this file keeps
+# NODE_ENV=development and no TLS. Never deploy this file as-is.
+services:
+  db:
+    image: postgres:15.4-alpine
+    environment:
+      POSTGRES_USER: asisten
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-asisten}
+      POSTGRES_DB: asistensiswa
+    ports:
+      - '5432:5432'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U asisten -d asistensiswa']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: '4000'
+      DATABASE_URL: postgresql://asisten:${POSTGRES_PASSWORD:-asisten}@db:5432/asistensiswa
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?set FIELD_ENCRYPTION_KEY (node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")}
+      TIMEZONE: ${TIMEZONE:-Asia/Jakarta}
+    ports:
+      - '4000:4000'
+
+volumes:
+  db-data:

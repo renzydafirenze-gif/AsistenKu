@@ -1,0 +1,1980 @@
+openapi: 3.0.3
+
+info:
+  title: AsistenSiswa API
+  version: 1.0.0
+  description: |
+    Backend API for the AsistenSiswa mobile assistant (Indonesian high-school
+    students, parents, teachers and class guardians).
+
+    ## Conventions
+    * All endpoints live under `/api/v1` and speak JSON.
+    * Dates without a time are `YYYY-MM-DD` keys in the school timezone
+      (`Asia/Jakarta` by default); timestamps are ISO-8601 UTC strings.
+    * Errors always use the envelope `{ "error": { code, message, requestId } }`.
+      Validation failures add a `details` array of `{ path, message }`.
+    * Authenticated calls use `Authorization: Bearer <accessToken>`. Access
+      tokens live 15 minutes; refresh tokens rotate on every use and reuse
+      revokes the whole token family.
+
+    ## Business rules enforced here
+    * The H-1 duty reminder is delivered **only** to the student assigned to the
+      duty, once per duty (deduplicated by `NotificationLog.dedupeKey`).
+    * A published exam is immutable: updates and deletes return `403` and are
+      written to the audit log.
+    * Uniform checklist items are validated against the academic calendar; a
+      holiday permits nothing and an unlisted key is rejected with `409`.
+    * Late homework is red-flagged and cannot be deleted by anyone.
+    * Offline changes are merged field-by-field with a hybrid logical clock and
+      then re-validated against these same rules server-side.
+
+  license:
+    name: Proprietary
+  contact:
+    name: AsistenSiswa Platform Team
+
+servers:
+  - url: https://api.asistensiswa.example.com/api/v1
+    description: Production (TLS terminated at the load balancer)
+  - url: http://localhost:3000/api/v1
+    description: Local development
+
+tags:
+  - name: Auth
+    description: Registration, session lifecycle and device tokens.
+  - name: Users
+    description: Class rosters, classmates and parent wards.
+  - name: Dashboard
+    description: Aggregated home screen payload.
+  - name: Duties
+    description: Duty (piket) schedules and completion.
+  - name: Uniform
+    description: Uniform catalogue, academic calendar and daily checklist.
+  - name: Homework
+    description: Homework authoring, submission and grading.
+  - name: Exams
+    description: Exam calendar with publish-time immutability.
+  - name: Subjects
+    description: Subjects, assigned teachers and resource links.
+  - name: Sync
+    description: Offline change ingestion and reconciliation.
+  - name: Notifications
+    description: In-app notification history and the internal H-1 scheduler.
+  - name: Ops
+    description: Liveness and readiness probes.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Ops]
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: Process is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  env: { type: string, example: production }
+                  time: { type: string, format: date-time }
+              example:
+                status: ok
+                env: production
+                time: '2026-05-10T03:00:00.000Z'
+
+  /health/ready:
+    get:
+      tags: [Ops]
+      summary: Readiness probe
+      security: []
+      responses:
+        '200':
+          description: Ready to serve traffic.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ready }
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a student or parent account
+      description: |
+        Self-registration is open for `STUDENT` and `PARENT`. Staff roles
+        (`TEACHER`, `CLASS_GUARDIAN`) require `inviteCode` to match the
+        server-side `STAFF_INVITE_CODE`; if that variable is unset, staff
+        self-registration is disabled entirely (`403`).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, fullName]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+                password:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                  description: Must contain at least one letter and one digit.
+                fullName: { type: string, minLength: 1, maxLength: 120 }
+                role:
+                  $ref: '#/components/schemas/Role'
+                classId:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Only valid for students and staff.
+                phone: { type: string, maxLength: 32, description: Encrypted at rest. }
+                address: { type: string, maxLength: 512, description: Encrypted at rest. }
+                inviteCode: { type: string, maxLength: 128 }
+            example:
+              email: ani@sekolah.test
+              password: Rahasia123
+              fullName: Ani Lestari
+              role: STUDENT
+      responses:
+        '201':
+          description: Account created and signed in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Sign in with email and password
+      description: |
+        Unknown emails and wrong passwords return the same `401` so the endpoint
+        cannot be used to enumerate accounts.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, maxLength: 128 }
+      responses:
+        '200':
+          description: Session issued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/google:
+    post:
+      tags: [Auth]
+      summary: Sign in with a Google ID token
+      description: |
+        Verifies the ID token against Google's JWKS, then links or creates the
+        account. Unverified Google emails are rejected.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idToken]
+              properties:
+                idToken: { type: string, minLength: 16, maxLength: 8192 }
+                role:
+                  $ref: '#/components/schemas/Role'
+                classId: { type: string, format: uuid, nullable: true }
+      responses:
+        '200':
+          description: Session issued (account created on first sign-in).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate a refresh token
+      description: |
+        Every successful call revokes the presented token and issues a new pair.
+        Reusing a rotated token revokes the entire family (theft detection).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string, minLength: 16, maxLength: 512 }
+      responses:
+        '200':
+          description: New token pair.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens: { $ref: '#/components/schemas/TokenPair' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke one refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string, minLength: 16, maxLength: 512 }
+      responses:
+        '204': { description: Revoked. }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: Revoke every session of the caller
+      responses:
+        '200':
+          description: Number of revoked refresh tokens.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked: { type: integer, minimum: 0 }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current profile
+      description: |
+        Tokens are bound to the role and class they were issued for; a change to
+        either invalidates existing access tokens.
+      responses:
+        '200':
+          description: The signed-in user.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change the password and revoke all sessions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password, newPassword]
+              properties:
+                password: { type: string, description: Current password. }
+                newPassword:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                  description: Must contain at least one letter and one digit.
+      responses:
+        '204': { description: Password changed. }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/push-tokens:
+    get:
+      tags: [Auth]
+      summary: List active device tokens of the caller
+      responses:
+        '200':
+          description: Active tokens.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/PushToken' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Auth]
+      summary: Register (or transfer) a device token
+      description: |
+        A token is globally unique. Registering a token already attached to
+        another account transfers ownership and writes a `push_token.transfer`
+        audit entry, so a resold device never notifies the previous owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, platform]
+              properties:
+                token: { type: string, minLength: 16, maxLength: 4096 }
+                platform: { $ref: '#/components/schemas/NotificationChannel' }
+      responses:
+        '201':
+          description: Token registered.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  platform: { $ref: '#/components/schemas/NotificationChannel' }
+                  registeredAt: { type: string, format: date-time }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Auth]
+      summary: Revoke a device token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, platform]
+              properties:
+                token: { type: string, minLength: 16, maxLength: 4096 }
+                platform: { $ref: '#/components/schemas/NotificationChannel' }
+      responses:
+        '204': { description: Revoked. }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /users/classmates:
+    get:
+      tags: [Users]
+      summary: Class roster of the caller (or an explicit class)
+      description: |
+        Students may only read their own class. Parents may read a class one of
+        their wards belongs to. Staff without a homeroom may read any class.
+      parameters:
+        - name: classId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Roster entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        fullName: { type: string }
+                        role: { $ref: '#/components/schemas/Role' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /users/wards:
+    get:
+      tags: [Users]
+      summary: Children linked to the signed-in parent
+      responses:
+        '200':
+          description: Ward list (empty for non-parent roles).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        fullName: { type: string }
+                        classId: { type: string, format: uuid, nullable: true }
+
+  /users/{classId}/roster:
+    get:
+      tags: [Users]
+      summary: Full roster including inactive accounts (staff only)
+      parameters:
+        - name: classId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Roster entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        fullName: { type: string }
+                        email: { type: string, format: email }
+                        role: { $ref: '#/components/schemas/Role' }
+                        isActive: { type: boolean }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Home screen payload
+      description: |
+        Returns the five colour-coded cards (duty, uniform, homework, exam,
+        subjects) with badge text and colour tokens, plus the palette the mobile
+        theme uses. Badge colours come from the shared palette so the app and the
+        API cannot drift.
+      parameters:
+        - name: date
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+      responses:
+        '200':
+          description: Dashboard payload.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
+
+  /duties:
+    get:
+      tags: [Duties]
+      summary: List duty schedules
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: to
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: classId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: studentId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: completed
+          in: query
+          schema: { type: string, enum: ['true', 'false'] }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Page of duties.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Duty' }
+                  nextCursor: { type: string, format: uuid, nullable: true }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Duties]
+      summary: Create a duty assignment (staff only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DutyCreate' }
+      responses:
+        '201':
+          description: Created duty.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  duty: { $ref: '#/components/schemas/Duty' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /duties/{id}:
+    get:
+      tags: [Duties]
+      summary: Read one duty
+      parameters:
+        - $ref: '#/components/parameters/DutyId'
+      responses:
+        '200':
+          description: The duty.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  duty: { $ref: '#/components/schemas/Duty' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Duties]
+      summary: Update a duty (staff only, not once completed)
+      parameters:
+        - $ref: '#/components/parameters/DutyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+                shift: { $ref: '#/components/schemas/DutyShift' }
+                assignedStudentId: { type: string, format: uuid }
+                notes: { type: string, maxLength: 500, nullable: true }
+      responses:
+        '200':
+          description: Updated duty.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  duty: { $ref: '#/components/schemas/Duty' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Duties]
+      summary: Soft-delete a duty (staff only)
+      parameters:
+        - $ref: '#/components/parameters/DutyId'
+      responses:
+        '204': { description: Deleted. }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /duties/{id}/complete:
+    post:
+      tags: [Duties]
+      summary: Mark a duty complete
+      description: |
+        The assigned student, or staff of the same class, may complete a duty.
+        Completion before the duty day returns `409`. Completing twice is
+        idempotent and returns an informational toast instead of an error.
+      parameters:
+        - $ref: '#/components/parameters/DutyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                completedAt: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Completion result plus the toast the app should show.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  duty: { $ref: '#/components/schemas/Duty' }
+                  toast:
+                    type: object
+                    properties:
+                      type: { type: string, enum: [success, info] }
+                      message: { type: string }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /uniform/items:
+    get:
+      tags: [Uniform]
+      summary: Active uniform catalogue
+      responses:
+        '200':
+          description: Catalogue entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/UniformItemDefinition' }
+    post:
+      tags: [Uniform]
+      summary: Add a uniform item (staff only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, label]
+              properties:
+                key:
+                  type: string
+                  pattern: '^[a-z0-9_]{2,60}$'
+                label: { type: string, minLength: 1, maxLength: 120 }
+                category: { type: string, enum: [DAILY, CEREMONY, SPORTS, SPECIAL] }
+                isDefault: { type: boolean }
+      responses:
+        '201':
+          description: Created item.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item: { $ref: '#/components/schemas/UniformItemDefinition' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /uniform/permitted:
+    get:
+      tags: [Uniform]
+      summary: Items the academic calendar permits on a date
+      parameters:
+        - name: date
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+      responses:
+        '200':
+          description: Calendar rule for the day.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+                  dayType: { $ref: '#/components/schemas/DayType' }
+                  keys:
+                    type: array
+                    items: { type: string }
+                  note: { type: string, nullable: true }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /uniform/calendar:
+    get:
+      tags: [Uniform]
+      summary: Academic calendar range
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+      responses:
+        '200':
+          description: Calendar entries in the range.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CalendarDay' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    put:
+      tags: [Uniform]
+      summary: Upsert a calendar day (staff only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, dayType]
+              properties:
+                date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+                dayType: { $ref: '#/components/schemas/DayType' }
+                uniformItems:
+                  type: array
+                  maxItems: 20
+                  items: { type: string }
+                note: { type: string, maxLength: 300, nullable: true }
+      responses:
+        '200':
+          description: Stored calendar day.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  day: { $ref: '#/components/schemas/CalendarDay' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /uniform/checklist:
+    get:
+      tags: [Uniform]
+      summary: Daily uniform checklist
+      description: |
+        Students read their own checklist. Non-student callers must pass
+        `studentId` and be allowed to view that student.
+      parameters:
+        - name: date
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: studentId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Checklist for the day.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checklist: { $ref: '#/components/schemas/UniformChecklist' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    patch:
+      tags: [Uniform]
+      summary: Toggle one checklist item
+      description: |
+        The server re-validates against the academic calendar. An item that the
+        day does not permit is rejected with `409`, and a holiday rejects every
+        toggle.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, itemKey, checked]
+              properties:
+                date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+                itemKey: { type: string, minLength: 1, maxLength: 60 }
+                checked: { type: boolean }
+      responses:
+        '200':
+          description: Updated checklist.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checklist: { $ref: '#/components/schemas/UniformChecklist' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /homework:
+    get:
+      tags: [Homework]
+      summary: List homework visible to the caller
+      description: |
+        Students and parents see per-student rows with their own submission
+        state; staff see aggregate rows with a submission summary. Late work
+        carries `accentColor` `#C0392B` (red) for both views.
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/HomeworkStatus' }
+        - name: subjectId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: classId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: studentId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: lateOnly
+          in: query
+          schema: { type: string, enum: ['true', 'false'] }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Page of homework.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Homework' }
+                  nextCursor: { type: string, format: uuid, nullable: true }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Homework]
+      summary: Create homework
+      description: |
+        Staff create class-wide homework. A student may create a personal task,
+        which is owned by that student and has no class.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subjectId, title, dueDate]
+              properties:
+                subjectId: { type: string, format: uuid }
+                classId: { type: string, format: uuid, nullable: true }
+                title: { type: string, minLength: 1, maxLength: 200 }
+                description: { type: string, maxLength: 5000 }
+                dueDate:
+                  type: string
+                  description: ISO-8601 timestamp, or a `YYYY-MM-DD` key (end of day).
+      responses:
+        '201':
+          description: Created homework.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  homework: { $ref: '#/components/schemas/Homework' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /homework/{id}:
+    get:
+      tags: [Homework]
+      summary: Read one homework item
+      parameters:
+        - $ref: '#/components/parameters/HomeworkId'
+      responses:
+        '200':
+          description: The homework item.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  homework: { $ref: '#/components/schemas/Homework' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Homework]
+      summary: Update homework
+      description: |
+        Blocked with `409` once any submission has been graded, and with `403`
+        for a student whose personal task is already past due.
+      parameters:
+        - $ref: '#/components/parameters/HomeworkId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200 }
+                description: { type: string, maxLength: 5000, nullable: true }
+                dueDate: { type: string }
+                subjectId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Updated homework.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  homework: { $ref: '#/components/schemas/Homework' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Homework]
+      summary: Soft-delete homework
+      description: |
+        Late homework is immutable: the request returns `403` and writes a
+        `homework.delete.denied` audit entry with reason
+        `LATE_HOMEWORK_IMMUTABLE`.
+      parameters:
+        - $ref: '#/components/parameters/HomeworkId'
+      responses:
+        '204': { description: Deleted. }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /homework/{id}/submissions:
+    get:
+      tags: [Homework]
+      summary: Submission roster
+      parameters:
+        - $ref: '#/components/parameters/HomeworkId'
+      responses:
+        '200':
+          description: One row per visible student.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/SubmissionRow' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /homework/{id}/submit:
+    post:
+      tags: [Homework]
+      summary: Submit homework
+      description: |
+        A submission after the due date is accepted but flagged `isLate`, which
+        also freezes the task against deletion.
+      parameters:
+        - $ref: '#/components/parameters/HomeworkId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 2000 }
+      responses:
+        '200':
+          description: The homework with the caller's submission state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  homework: { $ref: '#/components/schemas/Homework' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /homework/{id}/grade:
+    post:
+      tags: [Homework]
+      summary: Grade a submission (staff only)
+      parameters:
+        - $ref: '#/components/parameters/HomeworkId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentId, grade]
+              properties:
+                studentId: { type: string, format: uuid }
+                grade: { type: integer, minimum: 0, maximum: 100 }
+                feedback: { type: string, maxLength: 2000 }
+      responses:
+        '200':
+          description: The graded submission.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  submission: { $ref: '#/components/schemas/SubmissionRow' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /exams:
+    get:
+      tags: [Exams]
+      summary: Exam calendar
+      description: |
+        Students and parents only ever see published exams. Staff see drafts
+        unless `publishedOnly=true` is passed.
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: to
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: classId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: subjectId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: publishedOnly
+          in: query
+          schema: { type: string, enum: ['true', 'false'] }
+      responses:
+        '200':
+          description: Exams in the window.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Exam' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Exams]
+      summary: Create an exam (staff only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [classId, subjectId, title, examDate, startTime, endTime]
+              properties:
+                classId: { type: string, format: uuid }
+                subjectId: { type: string, format: uuid }
+                title: { type: string, minLength: 1, maxLength: 200 }
+                examDate: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+                startTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+                endTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+                room: { type: string, maxLength: 60, nullable: true }
+                publish: { type: boolean, default: false }
+      responses:
+        '201':
+          description: Created exam.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exam: { $ref: '#/components/schemas/Exam' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /exams/{id}:
+    get:
+      tags: [Exams]
+      summary: Read one exam
+      parameters:
+        - $ref: '#/components/parameters/ExamId'
+      responses:
+        '200':
+          description: The exam.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exam: { $ref: '#/components/schemas/Exam' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Exams]
+      summary: Update a draft exam
+      description: |
+        Published exams are immutable: this returns `403` and writes an
+        `exam.update.denied` audit entry with reason
+        `PUBLISHED_EXAM_IMMUTABLE`.
+      parameters:
+        - $ref: '#/components/parameters/ExamId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200 }
+                examDate: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+                startTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+                endTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+                room: { type: string, maxLength: 60, nullable: true }
+                subjectId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Updated exam.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exam: { $ref: '#/components/schemas/Exam' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Exams]
+      summary: Soft-delete a draft exam
+      parameters:
+        - $ref: '#/components/parameters/ExamId'
+      responses:
+        '204': { description: Deleted. }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /exams/{id}/publish:
+    post:
+      tags: [Exams]
+      summary: Publish an exam (irreversible)
+      description: Publishing locks the schedule for everyone. Calling it again is
+        idempotent and returns the already-published exam.
+      parameters:
+        - $ref: '#/components/parameters/ExamId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [published]
+              properties:
+                published: { type: boolean, enum: [true] }
+      responses:
+        '200':
+          description: Published exam.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exam: { $ref: '#/components/schemas/Exam' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /subjects:
+    get:
+      tags: [Subjects]
+      summary: Subjects visible to the caller
+      responses:
+        '200':
+          description: Subjects of the caller's class plus school-wide subjects.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Subject' }
+    post:
+      tags: [Subjects]
+      summary: Create a subject (staff only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                code:
+                  type: string
+                  pattern: '^[A-Z0-9-]{2,12}$'
+                name: { type: string, minLength: 1, maxLength: 120 }
+                description: { type: string, maxLength: 1000 }
+                classId: { type: string, format: uuid, nullable: true }
+                teacherId: { type: string, format: uuid, nullable: true }
+                resourceUrl:
+                  type: string
+                  format: uri
+                  maxLength: 2048
+                  description: Must use HTTPS.
+      responses:
+        '201':
+          description: Created subject.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subject: { $ref: '#/components/schemas/Subject' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /subjects/{id}:
+    patch:
+      tags: [Subjects]
+      summary: Update a subject (staff only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+                description: { type: string, maxLength: 1000, nullable: true }
+                teacherId: { type: string, format: uuid, nullable: true }
+                resourceUrl: { type: string, format: uri, nullable: true }
+      responses:
+        '200':
+          description: Updated subject.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subject: { $ref: '#/components/schemas/Subject' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Subjects]
+      summary: Soft-delete a subject (staff only)
+      description: Refused with `409` while the subject still has live homework.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Deleted. }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /sync/push:
+    post:
+      tags: [Sync]
+      summary: Push offline changes
+      description: |
+        Each change carries a hybrid logical clock. The server merges field by
+        field (LWW register, ties broken by node id) so two offline devices
+        editing different fields of one record both succeed. After merging the
+        business rules are re-applied: a stale write, a forbidden actor, a
+        published exam or a late homework surfaces as a `conflict` entry rather
+        than an HTTP error, so one bad change never blocks the batch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId, changes]
+              properties:
+                clientId: { type: string, minLength: 1, maxLength: 100 }
+                changes:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { $ref: '#/components/schemas/SyncChange' }
+      responses:
+        '200':
+          description: Per-change outcome.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncPushResult' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /sync/pull:
+    get:
+      tags: [Sync]
+      summary: Pull server state since a cursor
+      parameters:
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 200 }
+      responses:
+        '200':
+          description: Server-side entity states for the caller.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  serverTime: { type: string, format: date-time }
+                  cursor: { type: string, format: date-time, nullable: true }
+                  hasMore: { type: boolean }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        entityType: { $ref: '#/components/schemas/SyncEntityType' }
+                        entityId: { type: string, format: uuid }
+                        version: { type: integer }
+                        deleted: { type: boolean }
+                        fieldClocks:
+                          type: object
+                          additionalProperties: { type: string }
+                        updatedAt: { type: string, format: date-time }
+
+  /sync/status:
+    get:
+      tags: [Sync]
+      summary: Sync backlog indicator
+      responses:
+        '200':
+          description: Current sync state for the caller.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pending: { type: integer }
+                  conflicts: { type: integer }
+                  lastSyncedAt: { type: string, format: date-time, nullable: true }
+                  state: { type: string, enum: [SYNCED, PENDING, CONFLICT] }
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: Notification history of the caller
+      responses:
+        '200':
+          description: Most recent notifications.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/NotificationLog' }
+
+  /notifications/run-duty-reminders:
+    post:
+      tags: [Notifications]
+      summary: Run the H-1 duty reminder job
+      description: |
+        Called by the platform scheduler, not by a person, so it is authenticated
+        with the shared `INTERNAL_JOB_SECRET` header instead of a JWT. The
+        endpoint is disabled (`403`) unless that variable is configured.
+      security: []
+      parameters:
+        - name: x-job-secret
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Job summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scanned: { type: integer }
+                  sent: { type: integer }
+                  skipped: { type: integer }
+                  failed: { type: integer }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: HS256 access token, 15 minute lifetime.
+
+  parameters:
+    DutyId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    HomeworkId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ExamId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: Invalid input.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Data tidak valid
+              requestId: 4ecda7fb-fad1-4cfb-8dc0-484169dfb9e8
+              details:
+                - path: email
+                  message: Format email tidak valid
+    Unauthorized:
+      description: Missing, malformed, expired or stale token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: Sesi tidak valid, silakan masuk kembali
+              requestId: 4ecda7fb-fad1-4cfb-8dc0-484169dfb9e8
+    Forbidden:
+      description: Authenticated but not allowed (also used for immutable records).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error:
+              code: FORBIDDEN
+              message: Jadwal ujian yang sudah dipublikasikan tidak dapat diubah
+              requestId: 4ecda7fb-fad1-4cfb-8dc0-484169dfb9e8
+    NotFound:
+      description: Record does not exist or was soft-deleted.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Conflict:
+      description: Business rule violation or duplicate.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    TooManyRequests:
+      description: Rate limit exceeded (100 req/min per account or IP).
+      headers:
+        RateLimit:
+          schema: { type: string }
+          description: '`limit`, `remaining` and `reset` for the current window.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error:
+              code: TOO_MANY_REQUESTS
+              message: Terlalu banyak permintaan, coba lagi nanti
+              requestId: 4ecda7fb-fad1-4cfb-8dc0-484169dfb9e8
+
+  schemas:
+    Role:
+      type: string
+      enum: [STUDENT, PARENT, TEACHER, CLASS_GUARDIAN]
+    DutyShift:
+      type: string
+      enum: [MORNING, AFTERNOON]
+    DayType:
+      type: string
+      enum: [SCHOOL_DAY, HOLIDAY, EXAM_DAY, EVENT]
+    HomeworkStatus:
+      type: string
+      enum: [PENDING, SUBMITTED, GRADED]
+    NotificationChannel:
+      type: string
+      enum: [FCM, APNS]
+    SyncEntityType:
+      type: string
+      enum: [DUTY, UNIFORM_CHECKLIST, HOMEWORK, EXAM, SUBJECT]
+    SyncOperation:
+      type: string
+      enum: [CREATE, UPDATE, DELETE]
+
+    Palette:
+      type: object
+      description: Shared colour tokens; the mobile theme consumes these verbatim.
+      properties:
+        primary: { type: string, example: '#2E86C1' }
+        secondary: { type: string, example: '#F39C12' }
+        accent: { type: string, example: '#27AE60' }
+        danger: { type: string, example: '#C0392B' }
+        neutral: { type: string, example: '#7F8C8D' }
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: { type: string, example: VALIDATION_ERROR }
+            message: { type: string }
+            requestId: { type: string, format: uuid }
+            details:
+              description: Present for validation errors and duplicate fields.
+              nullable: true
+
+    TokenPair:
+      type: object
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        tokenType: { type: string, enum: [Bearer] }
+        expiresIn: { type: integer, description: Access token lifetime in seconds. }
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        fullName: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        classId: { type: string, format: uuid, nullable: true }
+        phone: { type: string, nullable: true, description: Decrypted on read. }
+        address: { type: string, nullable: true, description: Decrypted on read. }
+        avatarUrl: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    AuthResult:
+      type: object
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        tokens: { $ref: '#/components/schemas/TokenPair' }
+
+    PushToken:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        platform: { $ref: '#/components/schemas/NotificationChannel' }
+        createdAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+
+    Countdown:
+      type: object
+      properties:
+        days: { type: integer }
+        hours: { type: integer }
+        label: { type: string, example: H-1 }
+        isPast: { type: boolean }
+
+    Duty:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        classId: { type: string, format: uuid }
+        className: { type: string }
+        date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        shift: { $ref: '#/components/schemas/DutyShift' }
+        assignedStudentId: { type: string, format: uuid }
+        assignedStudentName: { type: string }
+        notes: { type: string, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        status: { type: string, enum: [COMPLETED, TODAY, UPCOMING, OVERDUE] }
+        countdown: { $ref: '#/components/schemas/Countdown' }
+        canComplete: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    DutyCreate:
+      type: object
+      required: [classId, date, shift, assignedStudentId]
+      properties:
+        classId: { type: string, format: uuid }
+        date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        shift: { $ref: '#/components/schemas/DutyShift' }
+        assignedStudentId: { type: string, format: uuid }
+        notes: { type: string, maxLength: 500 }
+
+    UniformItemDefinition:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        key: { type: string }
+        label: { type: string }
+        category: { type: string, enum: [DAILY, CEREMONY, SPORTS, SPECIAL] }
+        isDefault: { type: boolean }
+        isActive: { type: boolean }
+
+    CalendarDay:
+      type: object
+      properties:
+        date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        dayType: { $ref: '#/components/schemas/DayType' }
+        uniformItems:
+          type: array
+          items: { type: string }
+        note: { type: string, nullable: true }
+
+    UniformChecklist:
+      type: object
+      properties:
+        date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        dayType: { $ref: '#/components/schemas/DayType' }
+        note: { type: string, nullable: true }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              label: { type: string }
+              category: { type: string }
+              checked: { type: boolean }
+              checkedAt: { type: string, format: date-time, nullable: true }
+        completedCount: { type: integer }
+        total: { type: integer }
+        status: { type: string, enum: [COMPLETE, PARTIAL, PENDING, HOLIDAY] }
+        badge:
+          type: object
+          properties:
+            label: { type: string }
+            color: { type: string, example: '#27AE60' }
+        updatedAt: { type: string, format: date-time, nullable: true }
+
+    HomeworkSummary:
+      type: object
+      properties:
+        total: { type: integer }
+        pending: { type: integer }
+        submitted: { type: integer }
+        graded: { type: integer }
+        late: { type: integer }
+
+    HomeworkPermissions:
+      type: object
+      properties:
+        canEdit: { type: boolean }
+        canDelete: { type: boolean }
+        canSubmit: { type: boolean }
+        canGrade: { type: boolean }
+
+    Homework:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        subject:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            code: { type: string }
+        classId: { type: string, format: uuid, nullable: true }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        dueDate: { type: string, format: date-time }
+        publishedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        isOverdue: { type: boolean }
+        isLate:
+          type: boolean
+          description: True for late work; the UI must render it red (#C0392B).
+        accentColor:
+          type: string
+          enum: ['#C0392B', '#2E86C1', '#27AE60', '#F39C12']
+        assignment:
+          type: object
+          nullable: true
+          description: Per-student view; null for the staff aggregate view.
+          properties:
+            studentId: { type: string, format: uuid }
+            studentName: { type: string }
+        status: { $ref: '#/components/schemas/HomeworkStatus' }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        grade: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        feedback: { type: string, nullable: true }
+        summary:
+          allOf:
+            - $ref: '#/components/schemas/HomeworkSummary'
+          description: Staff view only.
+        permissions: { $ref: '#/components/schemas/HomeworkPermissions' }
+
+    SubmissionRow:
+      type: object
+      properties:
+        studentId: { type: string, format: uuid }
+        studentName: { type: string }
+        status: { $ref: '#/components/schemas/HomeworkStatus' }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        isLate: { type: boolean }
+        grade: { type: integer, nullable: true }
+        feedback: { type: string, nullable: true }
+
+    Exam:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        classId: { type: string, format: uuid }
+        className: { type: string }
+        subject:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            code: { type: string }
+        title: { type: string }
+        examDate: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        startTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+        endTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+        room: { type: string, nullable: true }
+        isPublished: { type: boolean }
+        publishedAt: { type: string, format: date-time, nullable: true }
+        isLocked:
+          type: boolean
+          description: Published exams are immutable for everyone.
+        daysUntil: { type: integer }
+        createdAt: { type: string, format: date-time }
+
+    Subject:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        classId: { type: string, format: uuid, nullable: true }
+        className: { type: string, nullable: true }
+        teacher:
+          type: object
+          nullable: true
+          properties:
+            id: { type: string, format: uuid }
+            fullName: { type: string }
+            email: { type: string, format: email }
+        resourceUrl: { type: string, nullable: true }
+        homeworkCount: { type: integer }
+
+    DashboardCard:
+      type: object
+      properties:
+        key: { type: string, enum: [duty, uniform, homework, exam, subjects] }
+        title: { type: string }
+        summary: { type: string }
+        badge:
+          type: object
+          properties:
+            label: { type: string }
+            color: { type: string }
+        route: { type: string }
+
+    Dashboard:
+      type: object
+      properties:
+        date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        greeting: { type: string, enum: [Selamat pagi, Selamat siang, Selamat sore, Selamat malam] }
+        user:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            fullName: { type: string }
+            role: { $ref: '#/components/schemas/Role' }
+            classId: { type: string, format: uuid, nullable: true }
+        palette: { $ref: '#/components/schemas/Palette' }
+        cards:
+          type: array
+          items: { $ref: '#/components/schemas/DashboardCard' }
+        detail:
+          type: object
+          properties:
+            duty: { $ref: '#/components/schemas/Duty' }
+            uniform: { $ref: '#/components/schemas/UniformChecklist' }
+            homework:
+              type: object
+              properties:
+                pending:
+                  type: array
+                  items: { $ref: '#/components/schemas/Homework' }
+                lateCount: { type: integer }
+                upcomingCount: { type: integer }
+            exam: { $ref: '#/components/schemas/Exam' }
+            subjects:
+              type: array
+              items: { $ref: '#/components/schemas/Subject' }
+
+    SyncChange:
+      type: object
+      required: [entityType, entityId, operation, hlc, lamport]
+      properties:
+        entityType: { $ref: '#/components/schemas/SyncEntityType' }
+        entityId: { type: string, format: uuid }
+        operation: { $ref: '#/components/schemas/SyncOperation' }
+        hlc:
+          type: string
+          description: '`<15-digit millis>:<5-digit counter>:<nodeId>`; fixed width so lexical order is causal order.'
+          example: '017900000000000:00000:device-a'
+        lamport: { type: integer, minimum: 0 }
+        payload:
+          type: object
+          additionalProperties: true
+
+    SyncPushResult:
+      type: object
+      properties:
+        serverTime: { type: string, format: date-time }
+        applied:
+          type: array
+          items:
+            type: object
+            properties:
+              entityType: { $ref: '#/components/schemas/SyncEntityType' }
+              entityId: { type: string, format: uuid }
+              operation: { $ref: '#/components/schemas/SyncOperation' }
+              version: { type: integer }
+              appliedFields:
+                type: array
+                items: { type: string }
+        conflicts:
+          type: array
+          items:
+            type: object
+            properties:
+              entityType: { $ref: '#/components/schemas/SyncEntityType' }
+              entityId: { type: string, format: uuid }
+              operation: { $ref: '#/components/schemas/SyncOperation' }
+              reason:
+                type: string
+                enum:
+                  - STALE_WRITE
+                  - INVALID_PAYLOAD
+                  - FORBIDDEN
+                  - NOT_FOUND
+                  - CONFLICT
+                  - APPLY_FAILED
+              message: { type: string }
+              serverVersion: { type: integer, nullable: true }
+
+    NotificationLog:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, example: DUTY_H1 }
+        channel: { $ref: '#/components/schemas/NotificationChannel' }
+        status: { type: string, enum: [PENDING, SENT, FAILED, SKIPPED] }
+        attempts: { type: integer }
+        lastError: { type: string, nullable: true }
+        sentAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
