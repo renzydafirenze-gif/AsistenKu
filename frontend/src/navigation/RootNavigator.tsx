@@ -44,7 +44,7 @@ const TABS: Array<{
   { name: 'Duty', title: 'Piket', a11y: 'Jadwal piket', icon: 'people-outline', iconFocused: 'people', component: DutyScreen },
   { name: 'Homework', title: 'PR', a11y: 'Pekerjaan rumah', icon: 'book-outline', iconFocused: 'book', component: HomeworkScreen },
   { name: 'Exam', title: 'Ujian', a11y: 'Jadwal ujian', icon: 'school-outline', iconFocused: 'school', component: ExamScreen },
-  { name: 'Uniform', title: 'Seragam', a11y: 'Checklist seragam', icon: 'shirt-outline', iconFocused: 'shirt', component: UniformScreen },
+  { name: 'Uniform', title: 'Seragam', a11y: 'Pengingat seragam', icon: 'shirt-outline', iconFocused: 'shirt', component: UniformScreen },
 ];
 
 function navTheme(theme: Theme): NavTheme {

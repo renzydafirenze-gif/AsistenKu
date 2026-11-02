@@ -2,13 +2,11 @@ import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
-import { ChecklistRow } from '../src/components/ChecklistRow';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { EmptyState } from '../src/components/EmptyState';
 import { Fab } from '../src/components/Fab';
 import { ListRow } from '../src/components/ListRow';
 import { PrimaryButton } from '../src/components/PrimaryButton';
-import { ProgressBar } from '../src/components/ProgressBar';
 import { Screen } from '../src/components/Screen';
 import { SectionHeader } from '../src/components/SectionHeader';
 import { SegmentedControl } from '../src/components/SegmentedControl';
@@ -106,14 +104,6 @@ describe('components', () => {
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
-  it('fills the progress track by ratio', () => {
-    const { getByLabelText, getByTestId } = wrap(
-      <ProgressBar value={1} total={4} label="1/4 selesai" />,
-    );
-    expect(getByLabelText('1/4 selesai')).toBeOnTheScreen();
-    expect(getByTestId('progress-fill')).toHaveStyle({ width: '25%' });
-  });
-
   it('closes the bottom sheet from the backdrop', () => {
     const onClose = jest.fn();
     const { getByText, getByLabelText } = wrap(
@@ -152,25 +142,6 @@ describe('components', () => {
 
     fireEvent.changeText(getByLabelText('Judul'), 'Latihan');
     expect(onChangeText).toHaveBeenCalledWith('Latihan');
-  });
-
-  it('toggles a checklist row and reports the new state', () => {
-    const onToggle = jest.fn();
-    const { getByRole } = wrap(
-      <ChecklistRow label="Dasi" category="Atribut" checked={false} onToggle={onToggle} />,
-    );
-
-    const checkbox = getByRole('checkbox');
-    expect(checkbox).not.toBeChecked();
-    fireEvent.press(checkbox);
-    expect(onToggle).toHaveBeenCalledWith(true);
-  });
-
-  it('blocks interaction for disabled checklist rows', () => {
-    const onToggle = jest.fn();
-    const { getByRole } = wrap(<ChecklistRow label="Dasi" checked disabled onToggle={onToggle} />);
-    fireEvent.press(getByRole('checkbox'));
-    expect(onToggle).not.toHaveBeenCalled();
   });
 
   it('keeps a recoverable screen when a child crashes', () => {

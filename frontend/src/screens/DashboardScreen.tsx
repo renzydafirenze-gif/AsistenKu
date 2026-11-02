@@ -8,7 +8,6 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { EmptyState } from '../components/EmptyState';
 import { ListRow } from '../components/ListRow';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { ProgressBar } from '../components/ProgressBar';
 import { Screen } from '../components/Screen';
 import { SectionHeader } from '../components/SectionHeader';
 import { Sheet } from '../components/Sheet';
@@ -235,13 +234,14 @@ export function DashboardScreen() {
       )}
 
       <SectionHeader title="Seragam" />
-      {detail?.uniform ? (
-        <ProgressBar
-          value={detail.uniform.completedCount}
-          total={detail.uniform.total}
-          label={`${detail.uniform.completedCount} dari ${detail.uniform.total} item siap`}
-        />
-      ) : null}
+      <ListRow
+        testID="dashboard-link-uniform"
+        title={detail?.uniform ? detail.uniform.label : 'Belum diatur'}
+        meta={detail?.uniform ? 'Seragam hari ini' : 'Atur pengingat seragam'}
+        detail={detail?.uniform?.detail ?? undefined}
+        onPress={() => navigation.navigate('Uniform')}
+        accessibilityHint="Membuka pengingat seragam"
+      />
 
       <SectionHeader title="Kelola" />
       <ListRow

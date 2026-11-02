@@ -2,7 +2,7 @@
 
 Offline mobile assistant for Indonesian high-school students. The student fills
 everything in on the phone: duty roster (piket), homework, exam schedule,
-subjects and teachers, plus a daily uniform checklist. No account, no server, no
+subjects and teachers, plus a weekly uniform reminder. No account, no server, no
 INTERNET permission — data never leaves the device.
 
 The `backend/` folder is a reference REST API kept for a future online mode; the
@@ -62,7 +62,7 @@ the Prisma schema so no database service is needed on the runner.
 
 Implemented and tested: backend API (auth/RBAC, all Phase 3–4 features, sync,
 push providers, migrations, OpenAPI, Docker, CI) and the app (dashboard, CRUD for
-duty/homework/exams/subjects, uniform checklist, Pengaturan with clear/demo data,
+duty/homework/exams/subjects, weekly uniform reminder, Pengaturan with clear/demo data,
 light/dark WCAG-checked theme) running entirely on local storage — the APK ships
 without the INTERNET permission. The backend is a reference for a future online
 mode and is not used by the app.

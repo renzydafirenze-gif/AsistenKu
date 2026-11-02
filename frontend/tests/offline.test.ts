@@ -3,7 +3,7 @@ import {
   buildOfflineDashboard,
   createDemoDataset,
   createEmptyDataset,
-  demoUniform,
+  DEFAULT_UNIFORM_PLANS,
   deriveDataset,
 } from '../src/offline/seed';
 import { createOfflineStorage, DATASET_KEY } from '../src/offline/storage';
@@ -41,7 +41,7 @@ describe('local dataset', () => {
     expect(dataset.exams).toEqual([]);
     expect(dataset.subjects).toEqual([]);
     expect(dataset.user.fullName).toBe('Siswa');
-    expect(dataset.uniform.total).toBe(4);
+    expect(dataset.uniformPlans).toEqual([]);
   });
 
   it('keeps example data behind an explicit action', async () => {
@@ -56,7 +56,7 @@ describe('local dataset', () => {
   it('derives statuses from dates instead of stored flags', () => {
     const derived = deriveDataset(
       {
-        ...createEmptyDataset(NOW),
+        ...createEmptyDataset(),
         duties: [
           {
             id: 'a',
@@ -99,10 +99,10 @@ describe('offline storage', () => {
     const backend = memoryBackend();
     const first = createOfflineStorage(backend);
     const seeded = await first.load();
-    await first.save({ ...seeded, uniform: { ...seeded.uniform, completedCount: 2 } });
+    await first.save({ ...seeded, uniformPlans: DEFAULT_UNIFORM_PLANS });
 
     const second = createOfflineStorage(backend);
-    expect((await second.load()).uniform.completedCount).toBe(2);
+    expect((await second.load()).uniformPlans).toHaveLength(5);
   });
 
   it('recovers from a corrupt payload', async () => {
@@ -119,35 +119,18 @@ describe('offline storage', () => {
 
     const dataset = await createOfflineStorage(backend).load();
     expect(dataset.duties).toEqual([]);
-    expect(dataset.uniform.total).toBe(4);
+    expect(dataset.uniformPlans).toEqual([]);
   });
 
-  it('rolls the day over even when the dataset is already cached', async () => {
-    const storage = createOfflineStorage(memoryBackend());
-    const first = await storage.load();
-
-    // Simulate the app staying open past midnight: write yesterday's ticks.
-    await storage.save({
-      ...first,
-      uniform: demoUniform(addDaysKey(formatDateKey(new Date()), -1), ['shirt']),
-    });
-
-    const reloaded = await storage.load();
-    expect(reloaded.uniform.date).toBe(formatDateKey(new Date()));
-    expect(reloaded.uniform.completedCount).toBe(0);
-  });
-
-  it('resets the uniform checklist when the stored day is old', async () => {
+  it('migrates a payload that still has the old uniform checklist', async () => {
     const backend = memoryBackend();
-    const seeded = createEmptyDataset(NOW);
-    await backend.setItem(
-      DATASET_KEY,
-      JSON.stringify({ ...seeded, uniform: demoUniform(addDaysKey(TODAY, -3), ['shirt']) }),
-    );
+    const legacy: Record<string, unknown> = { ...createEmptyDataset(), uniform: { items: [] } };
+    delete legacy.uniformPlans;
+    await backend.setItem(DATASET_KEY, JSON.stringify(legacy));
 
-    const dataset = await createOfflineStorage(backend).load();
-    expect(dataset.uniform.date).toBe(formatDateKey(new Date()));
-    expect(dataset.uniform.completedCount).toBe(0);
+    const loaded = await createOfflineStorage(backend).load();
+    expect(loaded.uniformPlans).toEqual([]);
+    expect(loaded.user.fullName).toBe('Siswa');
   });
 });
 
@@ -367,5 +350,57 @@ describe('subject linking', () => {
 
     expect((await repository.subjects()).items).toHaveLength(2);
     expect(first.subject?.id).not.toBe(second.subject?.id);
+  });
+});
+
+describe('uniform plan', () => {
+  const plan = (dayOfWeek: number, label: string) => ({ dayOfWeek, label, detail: '' });
+
+  it('creates, edits and deletes a weekly uniform', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+
+    const monday = await repository.saveUniformPlan(plan(1, 'Putih–Biru'));
+    expect(monday.label).toBe('Putih–Biru');
+    expect((await repository.uniformPlans())).toHaveLength(1);
+
+    const edited = await repository.saveUniformPlan(plan(2, 'Batik'), monday.id);
+    expect(edited.dayOfWeek).toBe(2);
+    expect((await repository.uniformPlans())[0]?.label).toBe('Batik');
+
+    await repository.removeUniformPlan(monday.id);
+    expect(await repository.uniformPlans()).toEqual([]);
+  });
+
+  it('rejects a second uniform on the same weekday', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    await repository.saveUniformPlan(plan(3, 'Pramuka'));
+
+    await expect(repository.saveUniformPlan(plan(3, 'Batik'))).rejects.toThrow(
+      'Hari itu sudah punya jadwal seragam.',
+    );
+  });
+
+  it('requires a uniform name and a valid weekday', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+
+    await expect(repository.saveUniformPlan(plan(1, '   '))).rejects.toThrow('Nama seragam wajib diisi.');
+    await expect(repository.saveUniformPlan(plan(7, 'Batik'))).rejects.toThrow('Hari tidak valid.');
+  });
+
+  it('shows today’s uniform on the dashboard', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    await repository.saveUniformPlan(plan(NOW.getDay(), 'Batik'));
+
+    const dashboard = await repository.dashboard();
+    expect(dashboard.cards.find((card) => card.key === 'uniform')?.summary).toBe('Hari ini: Batik');
+    expect(dashboard.detail?.uniform?.label).toBe('Batik');
+  });
+
+  it('keeps the weekly plan when clearing records', async () => {
+    const repository = createRepository(createOfflineStorage(memoryBackend()));
+    await repository.saveUniformPlan(plan(1, 'Putih–Biru'));
+
+    await repository.clearAll();
+    expect(await repository.uniformPlans()).toHaveLength(1);
   });
 });

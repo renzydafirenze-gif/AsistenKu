@@ -1,12 +1,13 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 
-import type { Dashboard, Duty, Exam, Homework, Subject, UniformChecklist } from '../api/types';
+import type { Dashboard, Duty, Exam, Homework, Subject, UniformPlan } from '../api/types';
 import type {
   DutyInput,
   ExamInput,
   HomeworkInput,
   Repository,
   SubjectInput,
+  UniformPlanInput,
 } from '../offline/repository';
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -17,7 +18,7 @@ export interface DataState {
   homework: { data: Homework[]; status: LoadStatus; error: string | null };
   exams: { data: Exam[]; status: LoadStatus; error: string | null };
   subjects: { data: Subject[]; status: LoadStatus; error: string | null };
-  uniform: { data: UniformChecklist | null; status: LoadStatus; error: string | null };
+  uniform: { data: UniformPlan[] | null; status: LoadStatus; error: string | null };
 }
 
 const initialState: DataState = {
@@ -45,7 +46,7 @@ interface Snapshot {
   homework: Homework[];
   exams: Exam[];
   subjects: Subject[];
-  uniform: UniformChecklist;
+  uniform: UniformPlan[];
 }
 
 /**
@@ -62,7 +63,7 @@ export const refreshAll = createAsyncThunk<Snapshot, void, { extra: DataDeps }>(
       extra.repository.homework(),
       extra.repository.exams(),
       extra.repository.subjects(),
-      extra.repository.uniformChecklist(),
+      extra.repository.uniformPlans(),
     ]);
     return {
       dashboard,
@@ -133,10 +134,13 @@ export const removeSubject = mutation('data/removeSubject', (repository, id: str
   repository.removeSubject(id),
 );
 
-export const toggleUniform = mutation(
-  'data/toggleUniform',
-  (repository, arg: { date: string; itemKey: string; checked: boolean }) =>
-    repository.toggleUniform(arg.date, arg.itemKey, arg.checked),
+export const saveUniformPlan = mutation(
+  'data/saveUniformPlan',
+  (repository, arg: { input: UniformPlanInput; id?: string }) =>
+    repository.saveUniformPlan(arg.input, arg.id),
+);
+export const removeUniformPlan = mutation('data/removeUniformPlan', (repository, id: string) =>
+  repository.removeUniformPlan(id),
 );
 
 export const updateProfile = mutation('data/updateProfile', (repository, name: string) =>

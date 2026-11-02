@@ -1,16 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { formatDateKey } from '../utils/format';
-import { createEmptyDataset, demoUniform, type OfflineDataset } from './seed';
+import type { OfflineDataset } from './seed';
+import { createEmptyDataset } from './seed';
 
 export const DATASET_KEY = 'asistenku.dataset.v2';
-
-/** Ticks belong to the day they were made; a new day starts a clean checklist. */
-function rollUniformToToday(dataset: OfflineDataset): OfflineDataset {
-  const today = formatDateKey(new Date());
-  if (dataset.uniform.date === today) return dataset;
-  return { ...dataset, uniform: demoUniform(today) };
-}
 
 /**
  * Guards against a half-written or older payload: a dataset without the
@@ -26,9 +19,25 @@ function isDataset(value: unknown): value is OfflineDataset {
     Array.isArray(candidate.homework) &&
     Array.isArray(candidate.exams) &&
     Array.isArray(candidate.subjects) &&
-    !!candidate.uniform &&
-    Array.isArray(candidate.uniform.items)
+    Array.isArray(candidate.uniformPlans)
   );
+}
+
+/**
+ * v2 payloads written before the uniform feature became a reminder stored a
+ * daily checklist instead of `uniformPlans`. Keep every other array so an
+ * existing install does not lose data; the student re-enters the week.
+ */
+function migrate(value: unknown): OfflineDataset | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  if (Array.isArray(candidate.uniformPlans)) return null;
+  if (!Array.isArray(candidate.duties) || !Array.isArray(candidate.homework)) return null;
+  if (!Array.isArray(candidate.exams) || !Array.isArray(candidate.subjects)) return null;
+  if (!candidate.user || typeof candidate.user !== 'object') return null;
+  const { uniform: legacyUniform, ...rest } = candidate;
+  void legacyUniform;
+  return { ...(rest as unknown as OfflineDataset), uniformPlans: [] };
 }
 
 type Backend = Pick<typeof AsyncStorage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -50,20 +59,19 @@ export function createOfflineStorage(backend: Backend = AsyncStorage): OfflineSt
 
   return {
     load: async () => {
-      if (cache) {
-        // The app can stay open past midnight; roll the day over on read.
-        const rolled = rollUniformToToday(cache);
-        if (rolled !== cache) await persist(rolled);
-        return rolled;
-      }
+      if (cache) return cache;
       const raw = await backend.getItem(DATASET_KEY);
       if (raw) {
         try {
           const parsed: unknown = JSON.parse(raw);
           if (isDataset(parsed)) {
-            const rolled = rollUniformToToday(parsed);
-            await persist(rolled);
-            return rolled;
+            await persist(parsed);
+            return parsed;
+          }
+          const migrated = migrate(parsed);
+          if (migrated) {
+            await persist(migrated);
+            return migrated;
           }
         } catch {
           // Fall through to a fresh dataset below.

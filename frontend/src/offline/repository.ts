@@ -6,14 +6,13 @@ import type {
   Homework,
   Page,
   Subject,
-  UniformChecklist,
+  UniformPlan,
 } from '../api/types';
 import { formatDateKey } from '../utils/format';
 import {
   buildOfflineDashboard,
   createDemoDataset,
   createEmptyDataset,
-  demoUniform,
   deriveDataset,
   type OfflineDataset,
 } from './seed';
@@ -47,6 +46,12 @@ export interface SubjectInput {
   code: string;
   teacherName: string;
   teacherEmail: string;
+}
+
+export interface UniformPlanInput {
+  dayOfWeek: number;
+  label: string;
+  detail: string;
 }
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
@@ -150,8 +155,9 @@ export interface Repository {
   saveSubject(input: SubjectInput, id?: string): Promise<Subject>;
   removeSubject(id: string): Promise<void>;
 
-  uniformChecklist(date?: string): Promise<UniformChecklist>;
-  toggleUniform(date: string, itemKey: string, checked: boolean): Promise<UniformChecklist>;
+  uniformPlans(): Promise<UniformPlan[]>;
+  saveUniformPlan(input: UniformPlanInput, id?: string): Promise<UniformPlan>;
+  removeUniformPlan(id: string): Promise<void>;
 
   updateProfile(fullName: string): Promise<void>;
   /** Back to a clean slate (no example rows). */
@@ -379,21 +385,49 @@ export function createRepository(storage: OfflineStorage): Repository {
       });
     },
 
-    uniformChecklist: async (date?: string) => {
+    uniformPlans: async () => {
       const dataset = await load();
-      // A stored checklist belongs to the day it was generated for.
-      if (date && dataset.uniform.date !== date) return demoUniform(date);
-      return dataset.uniform;
+      // Monday-first so the screen reads like a school week.
+      return [...dataset.uniformPlans].sort(
+        (a, b) => ((a.dayOfWeek + 6) % 7) - ((b.dayOfWeek + 6) % 7),
+      );
     },
 
-    toggleUniform: async (date, itemKey, checked) => {
+    saveUniformPlan: async (input, id) => {
       const dataset = await load();
-      const checkedKeys = dataset.uniform.items
-        .filter((item) => (item.key === itemKey ? checked : item.checked))
-        .map((item) => item.key);
-      const checklist = demoUniform(date, checkedKeys);
-      await storage.save({ ...dataset, uniform: checklist });
-      return checklist;
+      const label = requireText(input.label, 'Nama seragam');
+      if (!Number.isInteger(input.dayOfWeek) || input.dayOfWeek < 0 || input.dayOfWeek > 6) {
+        throw new Error('Hari tidak valid.');
+      }
+      const existing = id ? dataset.uniformPlans.find((item) => item.id === id) : undefined;
+      if (id && !existing) throw new Error('Jadwal seragam tidak ditemukan.');
+      // One uniform per weekday keeps the reminder unambiguous.
+      const clash = dataset.uniformPlans.find(
+        (item) => item.id !== id && item.dayOfWeek === input.dayOfWeek,
+      );
+      if (clash) throw new Error('Hari itu sudah punya jadwal seragam.');
+
+      const plan: UniformPlan = {
+        id: existing?.id ?? newId('uniform'),
+        dayOfWeek: input.dayOfWeek,
+        label,
+        detail: input.detail.trim() || null,
+      };
+      await storage.save({
+        ...dataset,
+        uniformPlans: existing
+          ? dataset.uniformPlans.map((item) => (item.id === plan.id ? plan : item))
+          : [...dataset.uniformPlans, plan],
+      });
+      return plan;
+    },
+
+    removeUniformPlan: async (id) => {
+      const dataset = await load();
+      await storage.save({
+        ...dataset,
+        uniformPlans: dataset.uniformPlans.filter((item) => item.id !== id),
+      });
     },
 
     updateProfile: async (fullName) => {
@@ -404,8 +438,13 @@ export function createRepository(storage: OfflineStorage): Repository {
 
     clearAll: async () => {
       const dataset = await load();
-      // The sheet only promises to clear schedules and mapel, so the name stays.
-      await storage.save({ ...createEmptyDataset(), user: dataset.user });
+      // The sheet only promises to clear records, so the name and the weekly
+      // uniform plan stay (they are settings, not entries to re-type).
+      await storage.save({
+        ...createEmptyDataset(),
+        user: dataset.user,
+        uniformPlans: dataset.uniformPlans,
+      });
     },
 
     loadDemo: async () => {

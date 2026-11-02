@@ -2,7 +2,7 @@
 
 Expo (SDK 50, React Native 0.73.6) + TypeScript app that students fill in
 themselves: duty roster (piket), homework, exam schedule, subjects and teachers,
-plus a daily uniform checklist. Late homework is red and cannot be deleted;
+plus a weekly uniform reminder. Late homework is red and cannot be deleted;
 published exams are locked.
 
 **Fully offline.** No API client, no login, no INTERNET permission. Every screen
@@ -60,12 +60,17 @@ and subjects. `repository.ts` is the only data source and owns every rule:
 - a published exam is locked — no edit, no delete;
 - typing a subject on a PR or ujian links it to the mapel list, creating the
   mapel on first use, so the list and the rows never disagree;
+- a uniform reminder is one plan per weekday (Monday-first), user-defined
+  because every school has its own rotation; the dashboard pins today's;
 - `clearAll()` drops schedules, PR, exams and mapel but keeps the student's
-  name; `loadDemo()` loads the example dataset (both from Pengaturan).
+  name and the weekly uniform plan; `loadDemo()` loads the example dataset
+  (both from Pengaturan).
 
-`storage.ts` persists to AsyncStorage under `asistenku.dataset.v2` and rolls the
-uniform checklist over at midnight. After every mutation `refreshAll` reloads
-the whole (small) dataset once, so the dashboard never shows stale counts.
+`storage.ts` persists to AsyncStorage under `asistenku.dataset.v2`, rejects
+half-written payloads, and migrates a pre-0.5 payload that stored a daily
+uniform checklist into an empty `uniformPlans` array without dropping other
+rows. After every mutation `refreshAll` reloads the whole (small) dataset once,
+so the dashboard never shows stale counts.
 
 ponytail: data is device-local. Add export/import when it must move between
 phones.
@@ -95,7 +100,7 @@ conventions below, applied to this content.
 - **Status is text plus a dot.** Colour never carries meaning alone, which also
   keeps screen readers correct.
 - **Dashboard answers "what now".** Greeting, three stat tiles, a "Hari ini"
-  agenda, uniform progress, then explicit management links.
+  agenda, today's uniform, then explicit management links.
 - **Empty states teach.** Icon, one sentence on why it is empty, plus the FAB
   and inline copy for the next step.
 - **Create is a FAB** in the bottom-right; pull-to-refresh stays on every list.
@@ -127,9 +132,9 @@ Hardening added after the first real-device pass:
 - **Mapel stay unique by name**, because that name is what links PR/ujian to the
   subject list.
 
-Checked on an Android 10 x86_64 emulator (`asistenku-0.4.2.apk`): cold start,
+Checked on an Android 10 x86_64 emulator (`asistenku-0.5.0.apk`): cold start,
 create/edit/delete for piket, PR, ujian and mapel, publish-then-locked, late PR
-without delete, uniform ticks, rename, demo load, clear-all, validation alerts,
+without delete, uniform plan CRUD, rename, demo load, clear-all, validation alerts,
 keyboard-open sheets, force-stop restart — no crash in `logcat`.
 
 ### Accessibility

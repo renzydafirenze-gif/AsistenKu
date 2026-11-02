@@ -6,7 +6,6 @@
 export type Role = 'STUDENT' | 'PARENT' | 'TEACHER' | 'CLASS_GUARDIAN';
 export type DutyShift = 'MORNING' | 'AFTERNOON';
 export type DutyStatus = 'COMPLETED' | 'TODAY' | 'UPCOMING' | 'OVERDUE';
-export type UniformStatus = 'COMPLETE' | 'PARTIAL' | 'PENDING' | 'HOLIDAY';
 
 export interface User {
   id: string;
@@ -84,23 +83,15 @@ export interface Exam {
   subject?: { id: string; name: string; code: string } | null;
 }
 
-export interface UniformItem {
-  key: string;
+/**
+ * A uniform the student wears on a given weekday. Schools differ, so the plan
+ * is user-defined: `dayOfWeek` follows `Date.getDay()` (0 = Sunday).
+ */
+export interface UniformPlan {
+  id: string;
+  dayOfWeek: number;
   label: string;
-  category?: string;
-  checked: boolean;
-  checkedAt?: string | null;
-}
-
-export interface UniformChecklist {
-  date: string;
-  dayType?: string;
-  note?: string | null;
-  items: UniformItem[];
-  completedCount: number;
-  total: number;
-  status?: UniformStatus;
-  badge?: Badge;
+  detail?: string | null;
 }
 
 export interface DashboardCard {
@@ -129,7 +120,7 @@ export interface Dashboard {
   cards: DashboardCard[];
   detail?: {
     duty?: Duty | null;
-    uniform?: UniformChecklist | null;
+    uniform?: UniformPlan | null;
     homework?: { pending?: Homework[]; lateCount?: number; upcomingCount?: number } | null;
     exam?: Exam | null;
     subjects?: Subject[];

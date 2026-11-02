@@ -4,7 +4,7 @@ import type {
   Exam,
   Homework,
   Subject,
-  UniformChecklist,
+  UniformPlan,
   User,
 } from '../api/types';
 import { addDaysKey, daysBetween, formatDateKey } from '../utils/format';
@@ -20,14 +20,16 @@ export interface OfflineDataset {
   homework: Homework[];
   exams: Exam[];
   subjects: Subject[];
-  uniform: UniformChecklist;
+  uniformPlans: UniformPlan[];
 }
 
-const UNIFORM_ITEMS = [
-  { key: 'shirt', label: 'Kemeja putih', category: 'Atasan' },
-  { key: 'trousers', label: 'Celana abu-abu', category: 'Bawahan' },
-  { key: 'tie', label: 'Dasi', category: 'Atribut' },
-  { key: 'shoes', label: 'Sepatu hitam', category: 'Alas kaki' },
+/** Default week: the common Indonesian school rotation, editable by the user. */
+export const DEFAULT_UNIFORM_PLANS: UniformPlan[] = [
+  { id: 'uniform-mon', dayOfWeek: 1, label: 'Putih–Biru', detail: 'Kemeja putih, celana/rok biru, dasi' },
+  { id: 'uniform-tue', dayOfWeek: 2, label: 'Batik', detail: null },
+  { id: 'uniform-wed', dayOfWeek: 3, label: 'Pramuka', detail: 'Seragam cokelat lengkap' },
+  { id: 'uniform-thu', dayOfWeek: 4, label: 'Batik', detail: null },
+  { id: 'uniform-fri', dayOfWeek: 5, label: 'Olahraga', detail: 'Kaos olahraga, celana training' },
 ];
 
 const SUBJECTS: Subject[] = [
@@ -51,31 +53,8 @@ const SUBJECTS: Subject[] = [
   },
 ];
 
-export function demoUniform(dateKey: string, checkedKeys: string[] = []): UniformChecklist {
-  const items = UNIFORM_ITEMS.map((item) => ({
-    ...item,
-    checked: checkedKeys.includes(item.key),
-    checkedAt: null,
-  }));
-  const completedCount = items.filter((item) => item.checked).length;
-  return {
-    date: dateKey,
-    dayType: 'SCHOOL_DAY',
-    note: null,
-    items,
-    completedCount,
-    total: items.length,
-    status:
-      completedCount === 0 ? 'PENDING' : completedCount === items.length ? 'COMPLETE' : 'PARTIAL',
-    badge:
-      completedCount === items.length
-        ? { label: 'Lengkap', color: '#27AE60' }
-        : { label: `${completedCount}/${items.length}`, color: '#F39C12' },
-  };
-}
-
 /** Fresh install: no schedules yet, only the profile placeholder. */
-export function createEmptyDataset(now: Date = new Date()): OfflineDataset {
+export function createEmptyDataset(): OfflineDataset {
   return {
     user: {
       id: 'local-user',
@@ -88,7 +67,7 @@ export function createEmptyDataset(now: Date = new Date()): OfflineDataset {
     homework: [],
     exams: [],
     subjects: [],
-    uniform: demoUniform(formatDateKey(now)),
+    uniformPlans: [],
   };
 }
 
@@ -250,7 +229,7 @@ export function createDemoDataset(now: Date = new Date()): OfflineDataset {
     homework,
     exams,
     subjects: SUBJECTS,
-    uniform: demoUniform(todayKey),
+    uniformPlans: DEFAULT_UNIFORM_PLANS,
   };
 }
 
@@ -268,7 +247,7 @@ export function buildOfflineDashboard(dataset: OfflineDataset, now: Date = new D
     [...dataset.exams]
       .sort((a, b) => a.examDate.localeCompare(b.examDate))
       .find((exam) => exam.examDate >= todayKey) ?? null;
-  const uniform = dataset.uniform;
+  const uniform = dataset.uniformPlans.find((plan) => plan.dayOfWeek === now.getDay()) ?? null;
 
   return {
     date: todayKey,
@@ -293,8 +272,8 @@ export function buildOfflineDashboard(dataset: OfflineDataset, now: Date = new D
       {
         key: 'uniform',
         title: 'Seragam',
-        summary: `${uniform.completedCount}/${uniform.total} item lengkap`,
-        badge: uniform.badge,
+        summary: uniform ? `Hari ini: ${uniform.label}` : 'Belum diatur untuk hari ini',
+        badge: uniform ? { label: 'Hari ini', color: '#2E86C1' } : { label: 'Kosong', color: '#7F8C8D' },
       },
       {
         key: 'homework',

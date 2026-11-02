@@ -14,7 +14,7 @@ import {
   saveExam,
   saveHomework,
   saveSubject,
-  toggleUniform,
+  saveUniformPlan,
   updateProfile,
 } from '../src/store/dataSlice';
 
@@ -147,16 +147,17 @@ describe('data slice (local)', () => {
     expect(store.getState().data.dashboard.data?.user.fullName).toBe('Budi');
   });
 
-  it('persists a uniform toggle', async () => {
+  it('persists a weekly uniform plan', async () => {
     const store = makeStore();
     await store.dispatch(refreshAll());
-    const date = store.getState().data.uniform.data!.date;
 
-    await store.dispatch(toggleUniform({ date, itemKey: 'shirt', checked: true }));
+    await store.dispatch(
+      saveUniformPlan({ input: { dayOfWeek: 1, label: 'Putih–Biru', detail: '' } }),
+    );
 
-    const uniform = store.getState().data.uniform.data!;
-    expect(uniform.completedCount).toBe(1);
-    expect(uniform.items.find((item) => item.key === 'shirt')?.checked).toBe(true);
+    const plans = store.getState().data.uniform.data!;
+    expect(plans).toHaveLength(1);
+    expect(plans[0]?.label).toBe('Putih–Biru');
   });
 
   it('surfaces storage failures instead of blanking rows', async () => {

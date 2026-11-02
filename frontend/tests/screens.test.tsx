@@ -338,41 +338,37 @@ describe('subjects screen', () => {
 });
 
 describe('uniform screen', () => {
-  it('groups items by category and toggles one', async () => {
-    const store = makeStore();
-    const { findByText, getByRole, getByLabelText } = renderScreen(<UniformScreen />, store);
+  it('reminds the uniform for today', async () => {
+    const dataset = createEmptyDataset();
+    dataset.uniformPlans = [
+      { id: 'uniform-today', dayOfWeek: new Date().getDay(), label: 'Batik', detail: 'Batik sekolah' },
+    ];
+    const backend = memoryBackend({ [DATASET_KEY]: JSON.stringify(dataset) });
+    const store = createStore({ offline: createOfflineStorage(backend) });
+    const { findByText, findByTestId } = renderScreen(<UniformScreen />, store);
 
-    expect(await findByText('ATASAN')).toBeOnTheScreen();
-    expect(await findByText('ALAS KAKI')).toBeOnTheScreen();
-    expect(getByLabelText('0/4 selesai')).toBeOnTheScreen();
-
-    await act(async () => {
-      fireEvent.press(getByRole('checkbox', { name: 'Dasi, Atribut' }));
-    });
-
-    expect(await findByText('1/4 selesai')).toBeOnTheScreen();
+    expect(await findByTestId('uniform-today')).toBeOnTheScreen();
+    expect(await findByText('Batik')).toBeOnTheScreen();
+    expect(await findByText('Batik sekolah')).toBeOnTheScreen();
   });
 
-  it('explains holidays', async () => {
-    const dataset = createDemoDataset();
-    const backend = memoryBackend({
-      [DATASET_KEY]: JSON.stringify({
-        ...dataset,
-        uniform: {
-          ...dataset.uniform,
-          items: [],
-          completedCount: 0,
-          total: 0,
-          status: 'HOLIDAY',
-          note: 'Libur semester',
-        },
-      }),
-    });
-    const store = createStore({ offline: createOfflineStorage(backend) });
-    const { findByText } = renderScreen(<UniformScreen />, store);
+  it('explains an empty week and adds a plan', async () => {
+    const store = makeStore(false);
+    const { findByText, getByLabelText, findByLabelText, queryByText } = renderScreen(
+      <UniformScreen />,
+      store,
+    );
 
-    expect(await findByText('Hari libur')).toBeOnTheScreen();
-    expect(await findByText('Libur semester')).toBeOnTheScreen();
+    expect(await findByText('Jadwal seragam masih kosong')).toBeOnTheScreen();
+    expect(queryByText('Belum diatur untuk hari ini')).toBeNull();
+
+    fireEvent.press(getByLabelText('Tambah seragam'));
+    fireEvent.changeText(await findByLabelText('Nama seragam'), 'Pramuka');
+    await act(async () => {
+      fireEvent.press(getByLabelText('Simpan'));
+    });
+
+    expect(await findByText('Pramuka')).toBeOnTheScreen();
   });
 });
 
