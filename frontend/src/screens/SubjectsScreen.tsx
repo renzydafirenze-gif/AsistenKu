@@ -13,6 +13,7 @@ import { TextField } from '../components/TextField';
 import type { Subject } from '../api/types';
 import { useAppDispatch, useAppSelector } from '../store';
 import { refreshAll, removeSubject, saveSubject } from '../store/dataSlice';
+import { errorHaptic, successHaptic } from '../utils/haptic';
 
 const errorMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
@@ -64,8 +65,10 @@ export function SubjectsScreen() {
     setSaving(true);
     try {
       await dispatch(saveSubject({ input: form, id: editingId ?? undefined })).unwrap();
+      successHaptic();
       setSheetOpen(false);
     } catch (failure) {
+      errorHaptic();
       Alert.alert('Gagal menyimpan', errorMessage(failure));
     } finally {
       setSaving(false);
@@ -84,7 +87,11 @@ export function SubjectsScreen() {
           setSheetOpen(false);
           dispatch(removeSubject(id))
             .unwrap()
-            .catch((failure) => Alert.alert('Gagal menghapus', errorMessage(failure)));
+            .then(() => successHaptic())
+            .catch((failure) => {
+              errorHaptic();
+              Alert.alert('Gagal menghapus', errorMessage(failure));
+            });
         },
       },
     ]);

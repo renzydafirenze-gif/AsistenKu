@@ -9,6 +9,7 @@ import { Screen } from '../components/Screen';
 import { SectionHeader } from '../components/SectionHeader';
 import { useAppDispatch, useAppSelector } from '../store';
 import { refreshAll, toggleUniform } from '../store/dataSlice';
+import { selectionHaptic } from '../utils/haptic';
 import { formatDateKey, formatIndonesianDay } from '../utils/format';
 
 export function UniformScreen() {
@@ -87,6 +88,7 @@ export function UniformScreen() {
                   checked={item.checked}
                   disabled={status === 'loading'}
                   onToggle={(checked) => {
+                    selectionHaptic();
                     void dispatch(toggleUniform({ date: data!.date, itemKey: item.key, checked }));
                   }}
                 />

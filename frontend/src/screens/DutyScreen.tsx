@@ -24,6 +24,8 @@ const SHIFTS: Array<{ value: DutyShift; label: string }> = [
   { value: 'AFTERNOON', label: 'Siang' },
 ];
 
+import { errorHaptic, successHaptic } from '../utils/haptic';
+
 const errorMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
   if (error && typeof error === 'object' && 'message' in error) {
@@ -80,8 +82,10 @@ export function DutyScreen() {
     setSaving(true);
     try {
       await dispatch(saveDuty({ input: form, id: editingId ?? undefined })).unwrap();
+      successHaptic();
       setSheetOpen(false);
     } catch (failure) {
+      errorHaptic();
       Alert.alert('Gagal menyimpan', errorMessage(failure));
     } finally {
       setSaving(false);
@@ -100,7 +104,11 @@ export function DutyScreen() {
           setSheetOpen(false);
           dispatch(removeDuty(id))
             .unwrap()
-            .catch((failure) => Alert.alert('Gagal menghapus', errorMessage(failure)));
+            .then(() => successHaptic())
+            .catch((failure) => {
+              errorHaptic();
+              Alert.alert('Gagal menghapus', errorMessage(failure));
+            });
         },
       },
     ]);
@@ -113,8 +121,10 @@ export function DutyScreen() {
       // Persist any edits before marking it done, so notes are not lost.
       await dispatch(saveDuty({ input: form, id: editingId })).unwrap();
       await dispatch(completeDuty(editingId)).unwrap();
+      successHaptic();
       setSheetOpen(false);
     } catch (failure) {
+      errorHaptic();
       Alert.alert('Gagal menyimpan', errorMessage(failure));
     } finally {
       setSaving(false);

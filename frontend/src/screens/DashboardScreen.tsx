@@ -19,6 +19,7 @@ import { useAppDispatch, useAppSelector } from '../store';
 import { clearAll, loadDemo, refreshAll, updateProfile } from '../store/dataSlice';
 import { useTheme } from '../theme/ThemeProvider';
 import { statusTone } from '../theme/tokens';
+import { errorHaptic, successHaptic } from '../utils/haptic';
 import { formatDateKey, formatIndonesianDate, greetingForHour } from '../utils/format';
 
 const errorMessage = (error: unknown) => {
@@ -64,8 +65,10 @@ export function DashboardScreen() {
     setSaving(true);
     try {
       await dispatch(updateProfile(nameDraft)).unwrap();
+      successHaptic();
       setSettingsOpen(false);
     } catch (failure) {
+      errorHaptic();
       Alert.alert('Gagal menyimpan', errorMessage(failure));
     } finally {
       setSaving(false);
@@ -74,8 +77,14 @@ export function DashboardScreen() {
 
   const runSettingsAction = (action: Promise<unknown>, label: string) => {
     action
-      .then(() => setSettingsOpen(false))
-      .catch((failure) => Alert.alert(label, errorMessage(failure)));
+      .then(() => {
+        successHaptic();
+        setSettingsOpen(false);
+      })
+      .catch((failure) => {
+        errorHaptic();
+        Alert.alert(label, errorMessage(failure));
+      });
   };
 
   const confirmClear = () => {

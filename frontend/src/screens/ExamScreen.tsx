@@ -14,6 +14,7 @@ import { todayKey } from '../offline/repository';
 import { useAppDispatch, useAppSelector } from '../store';
 import { publishExam, refreshAll, removeExam, saveExam } from '../store/dataSlice';
 import { useTheme } from '../theme/ThemeProvider';
+import { errorHaptic, successHaptic } from '../utils/haptic';
 import { formatIndonesianDay } from '../utils/format';
 import { groupByDay } from '../utils/group';
 
@@ -76,8 +77,10 @@ export function ExamScreen() {
     setSaving(true);
     try {
       await dispatch(saveExam({ input: form, id: editingId ?? undefined })).unwrap();
+      successHaptic();
       setSheetOpen(false);
     } catch (failure) {
+      errorHaptic();
       Alert.alert('Gagal menyimpan', errorMessage(failure));
     } finally {
       setSaving(false);
@@ -102,8 +105,10 @@ export function ExamScreen() {
                 // student just typed, not the previous stored version.
                 await dispatch(saveExam({ input: form, id })).unwrap();
                 await dispatch(publishExam(id)).unwrap();
+                successHaptic();
                 setSheetOpen(false);
               } catch (failure) {
+                errorHaptic();
                 Alert.alert('Gagal mempublikasikan', errorMessage(failure));
               } finally {
                 setSaving(false);
@@ -127,7 +132,11 @@ export function ExamScreen() {
           setSheetOpen(false);
           dispatch(removeExam(id))
             .unwrap()
-            .catch((failure) => Alert.alert('Gagal menghapus', errorMessage(failure)));
+            .then(() => successHaptic())
+            .catch((failure) => {
+              errorHaptic();
+              Alert.alert('Gagal menghapus', errorMessage(failure));
+            });
         },
       },
     ]);

@@ -120,6 +120,8 @@ Hardening added after the first real-device pass:
   ignore taps while a mutation is in flight.
 - **Error boundary** around the navigator: a render crash offers "Coba lagi"
   instead of a white screen; data on disk is untouched.
+- **Haptic feedback**: stubbed out; expo-haptics incompatible with expo SDK 50.
+  Upgrade to expo 52+ to restore native vibration on save/delete/toggle.
 - **No empty-state flash**: the store starts in `loading`, so a cold start never
   shows "belum ada ..." for one frame before the local read finishes.
 - **Mapel stay unique by name**, because that name is what links PR/ujian to the

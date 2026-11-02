@@ -18,6 +18,8 @@ import { brand } from '../theme/tokens';
 import { formatIndonesianDate } from '../utils/format';
 import { groupByDay } from '../utils/group';
 
+import { errorHaptic, successHaptic } from '../utils/haptic';
+
 const LATE = brand.danger;
 
 const errorMessage = (error: unknown) => {
@@ -70,8 +72,10 @@ export function HomeworkScreen() {
     setSaving(true);
     try {
       await dispatch(saveHomework({ input: form, id: editingId ?? undefined })).unwrap();
+      successHaptic();
       setSheetOpen(false);
     } catch (failure) {
+      errorHaptic();
       Alert.alert('Gagal menyimpan', errorMessage(failure));
     } finally {
       setSaving(false);
@@ -90,7 +94,11 @@ export function HomeworkScreen() {
           setSheetOpen(false);
           dispatch(removeHomework(id))
             .unwrap()
-            .catch((failure) => Alert.alert('Gagal menghapus', errorMessage(failure)));
+            .then(() => successHaptic())
+            .catch((failure) => {
+              errorHaptic();
+              Alert.alert('Gagal menghapus', errorMessage(failure));
+            });
         },
       },
     ]);
@@ -102,8 +110,10 @@ export function HomeworkScreen() {
     try {
       await dispatch(saveHomework({ input: form, id: editingId })).unwrap();
       await dispatch(completeHomework(editingId)).unwrap();
+      successHaptic();
       setSheetOpen(false);
     } catch (failure) {
+      errorHaptic();
       Alert.alert('Gagal menyimpan', errorMessage(failure));
     } finally {
       setSaving(false);

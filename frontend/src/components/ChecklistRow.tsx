@@ -3,6 +3,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '../theme/ThemeProvider';
 
+import { selectionHaptic } from '../utils/haptic';
+
 interface ChecklistRowProps {
   label: string;
   category?: string;
@@ -23,7 +25,10 @@ export function ChecklistRow({ label, category, checked, disabled, onToggle }: C
       accessibilityState={{ checked, disabled: !!disabled }}
       accessibilityLabel={category ? `${label}, ${category}` : label}
       disabled={disabled}
-      onPress={() => onToggle(!checked)}
+      onPress={() => {
+        selectionHaptic();
+        onToggle(!checked);
+      }}
       style={({ pressed }) => [
         styles.row,
         {

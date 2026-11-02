@@ -9,7 +9,7 @@ import {
 import { createOfflineStorage, DATASET_KEY } from '../src/offline/storage';
 import { addDaysKey, formatDateKey } from '../src/utils/format';
 
-const NOW = new Date(2026, 10, 1, 9, 0, 0);
+const NOW = new Date(2026, 10, 2, 9, 0, 0);
 const TODAY = formatDateKey(NOW);
 
 function memoryBackend() {
