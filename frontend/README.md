@@ -132,7 +132,7 @@ Hardening added after the first real-device pass:
 - **Mapel stay unique by name**, because that name is what links PR/ujian to the
   subject list.
 
-Checked on an Android 10 x86_64 emulator (`asistenku-0.5.0.apk`): cold start,
+Checked on an Android 10 x86_64 emulator (`asistenku-0.5.1-x86_64.apk`, R8 build): cold start,
 create/edit/delete for piket, PR, ujian and mapel, publish-then-locked, late PR
 without delete, uniform plan CRUD, rename, demo load, clear-all, validation alerts,
 keyboard-open sheets, force-stop restart — no crash in `logcat`.
@@ -176,10 +176,17 @@ font). Colours match `src/theme/tokens.ts`.
 Requires JDK 17 and Android SDK 34 (`ANDROID_HOME` set). No Expo account needed.
 
 ```bash
-npx expo prebuild -p android
-cd android && ./gradlew clean assembleRelease
-# -> app/build/outputs/apk/release/app-release.apk  (id.sch.asistenku)
+scripts/build-apk.sh              # arm64-v8a, ~10 MB
+scripts/build-apk.sh x86_64       # same flags, for the emulator
+# -> asistenku-<version>-<abi>.apk  (id.sch.asistenku)
 ```
+
+The script prebuilds, then builds one ABI with R8 minify, resource shrinking and
+compressed native libs. `plugins/withAbiSplits.js` injects the ABI split because
+the prebuilt React Native AARs ship every architecture; `reactNativeArchitectures`
+alone does not slim the APK. Size budget: 62 MB (v0.4.x, 4 ABIs, no shrinking)
+→ ~10 MB. `arm64-v8a` covers every phone sold since ~2018; build `x86_64` only
+for emulators, or `armeabi-v7a` for very old 32-bit devices.
 
 The generated project signs release builds with the debug keystore, so the APK
 installs on a device but is **not** store-ready. `gradle` caches `app.config` and

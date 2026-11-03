@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+// Deep import: the package index pulls every icon font (~4 MB), only Ionicons is used.
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { PrimaryButton } from './PrimaryButton';
 import { useTheme } from '../theme/ThemeProvider';

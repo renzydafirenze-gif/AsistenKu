@@ -9,8 +9,18 @@ import {
 import { createOfflineStorage, DATASET_KEY } from '../src/offline/storage';
 import { addDaysKey, formatDateKey } from '../src/utils/format';
 
+// Pin the clock so date-derived statuses never depend on the day the suite runs.
 const NOW = new Date(2026, 10, 2, 9, 0, 0);
 const TODAY = formatDateKey(NOW);
+
+beforeAll(() => {
+  jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+  jest.setSystemTime(NOW);
+});
+
+afterAll(() => {
+  jest.useRealTimers();
+});
 
 function memoryBackend() {
   const data = new Map<string, string>();

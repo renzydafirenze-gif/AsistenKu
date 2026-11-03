@@ -2,7 +2,8 @@ import React from 'react';
 import { NavigationContainer, type Theme as NavTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
+// Deep import: the package index pulls every icon font (~4 MB), only Ionicons is used.
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { DutyScreen } from '../screens/DutyScreen';
